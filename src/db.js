@@ -130,12 +130,78 @@ export function getCategory(id) {
   return db.prepare('SELECT id, name, parent_id, kind, is_hidden FROM categories WHERE id = ?').get(id);
 }
 
-// Adds a group (parentId null) or a sub (parentId = its group) and returns the new id.
-export function createCategory({ name, kind, parentId = null, sortOrder = 0 }) {
+// The sort_order that puts a new category last among its siblings (the other
+// groups, or the other subs of the same group). "parent_id IS ?" rather than
+// "= ?" so that it also works for groups, whose parent_id is null.
+function nextSortOrder(parentId) {
+  return db
+    .prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM categories WHERE parent_id IS ?')
+    .get(parentId).next;
+}
+
+// Adds a group (parentId null) or a sub (parentId = its group) and returns the
+// new id. Without a sortOrder it goes at the end of its list.
+export function createCategory({ name, kind, parentId = null, sortOrder = nextSortOrder(parentId) }) {
   const result = db
     .prepare('INSERT INTO categories (name, kind, parent_id, sort_order) VALUES (?, ?, ?, ?)')
     .run(name, kind, parentId, sortOrder);
   return Number(result.lastInsertRowid);
+}
+
+// True if another category in the same place (same group, or among the
+// groups) already has this name, ignoring capitalization. exceptId lets a
+// rename to "the same name with different capitals" through.
+export function categoryNameTaken(name, parentId, exceptId = 0) {
+  return Boolean(
+    db
+      .prepare('SELECT 1 FROM categories WHERE name = ? COLLATE NOCASE AND parent_id IS ? AND id != ?')
+      .get(name, parentId, exceptId)
+  );
+}
+
+// The functions below return true if a category with that id existed.
+
+export function renameCategory(id, name) {
+  return db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(name, id).changes > 0;
+}
+
+export function setCategoryHidden(id, isHidden) {
+  return (
+    db.prepare('UPDATE categories SET is_hidden = ? WHERE id = ?').run(isHidden ? 1 : 0, id).changes > 0
+  );
+}
+
+// Moves a sub to another group, placing it last there. It takes on the new
+// group's kind, so a sub moved into an income group counts as income.
+export function moveCategory(id, newParentId) {
+  return (
+    db
+      .prepare(
+        `UPDATE categories
+            SET parent_id = ?, sort_order = ?,
+                kind = (SELECT kind FROM categories WHERE id = ?)
+          WHERE id = ?`
+      )
+      .run(newParentId, nextSortOrder(newParentId), newParentId, id).changes > 0
+  );
+}
+
+export function countCategoryTransactions(id) {
+  return db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE category_id = ?').get(id).count;
+}
+
+export function countSubcategories(id) {
+  return db.prepare('SELECT COUNT(*) AS count FROM categories WHERE parent_id = ?').get(id).count;
+}
+
+// Permanently removes a category. The caller checks first that no transaction
+// uses it; the database's foreign key rule would refuse anyway. Payees that
+// used it as their default simply lose that default.
+export function deleteCategory(id) {
+  return allOrNothing(() => {
+    db.prepare('UPDATE payees SET default_category_id = NULL WHERE default_category_id = ?').run(id);
+    return db.prepare('DELETE FROM categories WHERE id = ?').run(id).changes > 0;
+  });
 }
 
 // --- Payees ---
@@ -146,6 +212,69 @@ export function listPayees() {
   return db
     .prepare('SELECT id, name, default_category_id FROM payees WHERE is_hidden = 0 ORDER BY name')
     .all();
+}
+
+// Every payee, hidden ones too, with how many transactions use each, for the
+// Payees screen.
+export function listPayeesWithUsage() {
+  return db
+    .prepare(
+      `SELECT p.id, p.name, p.default_category_id, p.is_hidden, COUNT(t.id) AS use_count
+         FROM payees p
+         LEFT JOIN transactions t ON t.payee_id = p.id
+        GROUP BY p.id
+        ORDER BY p.name`
+    )
+    .all();
+}
+
+export function getPayee(id) {
+  return db.prepare('SELECT id, name, default_category_id, is_hidden FROM payees WHERE id = ?').get(id);
+}
+
+// True if a different payee already has this name. The name column ignores
+// capitalization (schema.sql), so "pg&e" counts as taken by "PG&E".
+export function payeeNameTaken(name, exceptId = 0) {
+  return Boolean(db.prepare('SELECT 1 FROM payees WHERE name = ? AND id != ?').get(name, exceptId));
+}
+
+// The functions below return true if a payee with that id existed.
+
+export function renamePayee(id, name) {
+  return db.prepare('UPDATE payees SET name = ? WHERE id = ?').run(name, id).changes > 0;
+}
+
+export function setPayeeHidden(id, isHidden) {
+  return db.prepare('UPDATE payees SET is_hidden = ? WHERE id = ?').run(isHidden ? 1 : 0, id).changes > 0;
+}
+
+// categoryId may be null to clear the default.
+export function setPayeeDefaultCategory(id, categoryId) {
+  return (
+    db.prepare('UPDATE payees SET default_category_id = ? WHERE id = ?').run(categoryId, id).changes > 0
+  );
+}
+
+// Folds one payee into another, for near-duplicates like "Corner Mkt" and
+// "Corner Market". Everything that pointed at `fromId` is moved to `intoId`,
+// then `fromId` is deleted. All or nothing: a failure part-way leaves both
+// payees exactly as they were. Returns how many transactions moved.
+export function mergePayees(fromId, intoId) {
+  return allOrNothing(() => {
+    const moved = db
+      .prepare('UPDATE transactions SET payee_id = ? WHERE payee_id = ?')
+      .run(intoId, fromId).changes;
+    // Import rules (used from milestone 9) should now produce the kept payee.
+    db.prepare('UPDATE payee_rules SET payee_id = ? WHERE payee_id = ?').run(intoId, fromId);
+    // Keep the merged payee's default category only if the kept one has none.
+    db.prepare(
+      `UPDATE payees
+          SET default_category_id = (SELECT default_category_id FROM payees WHERE id = ?)
+        WHERE id = ? AND default_category_id IS NULL`
+    ).run(fromId, intoId);
+    db.prepare('DELETE FROM payees WHERE id = ?').run(fromId);
+    return moved;
+  });
 }
 
 // Remembers the category most recently used with a payee, so picking that

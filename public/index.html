@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dorset Finances</title>
   <link rel="stylesheet" href="/styles.css">
-  <!-- type="module" lets register.js use import/export, and runs it after the
-       page has loaded, so it can find the elements below. -->
-  <script type="module" src="/register.js"></script>
+  <!-- main.js starts the page and loads each screen's script. type="module"
+       lets the scripts use import/export, and runs them after the page has
+       loaded, so they can find the elements below. -->
+  <script type="module" src="/main.js"></script>
 </head>
 <body>
   <!-- Shown only when the server says it's using the sample database, so
@@ -16,9 +17,16 @@
 
   <header class="app-header">
     <h1>Dorset Finances</h1>
+    <!-- Screen switcher (see main.js). -->
+    <nav class="screen-nav">
+      <button type="button" data-screen="register">Register</button>
+      <button type="button" data-screen="categories">Categories</button>
+      <button type="button" data-screen="payees">Payees</button>
+    </nav>
   </header>
 
-  <main class="layout">
+  <!-- ===== Register screen (register.js) ===== -->
+  <main id="register-view" class="layout">
     <aside class="accounts">
       <h2>Accounts</h2>
       <ul id="account-list" class="account-list"></ul>
@@ -95,6 +103,48 @@
       <datalist id="payee-options"></datalist>
       <datalist id="category-options"></datalist>
     </section>
+  </main>
+
+  <!-- ===== Categories screen (categories.js) ===== -->
+  <main id="categories-view" class="screen" hidden>
+    <h2>Categories</h2>
+    <p class="muted">
+      Hidden categories stay on existing transactions but are left out of the register's suggestions.
+      A category can only be deleted if no transaction uses it.
+    </p>
+
+    <form id="add-group-form" class="inline-form">
+      <input name="name" required placeholder="New group name" autocomplete="off">
+      <select name="kind">
+        <option value="expense">Expense</option>
+        <option value="income">Income</option>
+      </select>
+      <button type="submit">+ Add group</button>
+    </form>
+
+    <div id="category-groups"></div>
+  </main>
+
+  <!-- ===== Payees screen (payees.js) ===== -->
+  <main id="payees-view" class="screen" hidden>
+    <h2>Payees</h2>
+    <p class="muted">
+      The default category fills in when you pick the payee in the register.
+      Merge folds a duplicate payee into another, moving all of its transactions.
+    </p>
+    <table class="simple-table">
+      <thead>
+        <tr>
+          <th>Payee</th>
+          <th>Default category</th>
+          <th class="col-money">Uses</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="payee-rows"></tbody>
+    </table>
+    <p id="no-payees" class="muted" hidden>No payees yet. They're created as you enter transactions.</p>
+    <datalist id="merge-payee-options"></datalist>
   </main>
 </body>
 </html>

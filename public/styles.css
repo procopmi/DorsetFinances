@@ -39,9 +39,108 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 18px;
+}
+
+/* Screen switcher: plain buttons, with the current screen underlined. */
+.screen-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.screen-nav button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.screen-nav button[aria-current="true"] {
+  border-bottom-color: var(--focus);
+  font-weight: 600;
+}
+
+/* --- Categories and Payees screens --- */
+
+.screen {
+  padding: 16px;
+  max-width: 900px;
+}
+
+.inline-form {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.category-group {
+  margin-bottom: 14px;
+}
+
+.category-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.category-row .category-name {
+  min-width: 220px;
+}
+
+.group-row h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.sub-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.tag {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+.simple-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.simple-table th,
+.simple-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.simple-table th {
+  background: var(--header-bg);
+}
+
+.simple-table .col-money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.payee-actions {
+  display: flex;
+  gap: 6px;
 }
 
 h2 {

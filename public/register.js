@@ -1,8 +1,11 @@
-// Runs in the browser. It asks the server for data (fetch) and fills in the page.
-// The browser never touches the database directly; it only talks to /api/ routes.
+// The Register screen: the account sidebar and the transaction grid.
+// It runs in the browser, asks the server for data (fetch) and fills in the
+// page. The browser never touches the database directly; it only talks to
+// /api/ routes.
 
 // The same money.js the server uses (and the tests cover), served at /money.js.
 import { parseDollarsToCents, formatCents } from '/money.js';
+import { byId, getJson, postJson, runAction } from '/api.js';
 
 // --- Page state ---
 // The accounts as last loaded from the server, and which one is selected.
@@ -11,38 +14,10 @@ import { parseDollarsToCents, formatCents } from '/money.js';
 let accounts = [];
 let selectedId = null;
 
-const byId = (id) => document.getElementById(id);
-
-// --- Talking to the server ---
-
-// Send a request and turn server errors (like "A name is required") into
-// thrown Errors, so problems surface instead of failing silently.
-async function request(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error ?? `Request failed: ${url}`);
-  }
-  return data;
-}
-
-const getJson = (url) => request(url);
-
-const postJson = (url, body) =>
-  request(url, {
-    method: 'POST',
-    // The server only accepts changes sent as JSON (see isTrustedRequest).
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-// Event handlers can't usefully return errors, so wrap them: any failure is
-// shown to you instead of disappearing into the browser console.
-function runAction(action) {
-  action().catch((err) => {
-    console.error(err);
-    alert(err.message);
-  });
+// Called by main.js whenever this screen is shown. Reloading every time means
+// renames and merges made on the other screens appear straight away.
+export function show() {
+  return reloadAccounts();
 }
 
 // --- Drawing the page ---
@@ -147,7 +122,7 @@ let lastEnteredDate = null; // new rows start with this date (see newRowDate)
 
 // For the Payee and Category boxes: the payee list (with each payee's default
 // category), and one entry per sub-category: { id, label: "Group: Sub",
-// subName, isHidden }.
+// groupName, subName, isHidden }.
 let payees = [];
 let categoryChoices = [];
 
@@ -184,8 +159,8 @@ async function loadRegister() {
 
 // Turns the flat category list from the server into "Group: Sub" choices, in
 // display order: each group's subs, group by group. A sub counts as hidden
-// if it or its group is hidden.
-function buildCategoryChoices(categoryList) {
+// if it or its group is hidden. Also used by the Payees screen.
+export function buildCategoryChoices(categoryList) {
   const groups = categoryList.filter((c) => c.parent_id === null);
   return groups.flatMap((group) =>
     categoryList
@@ -193,6 +168,7 @@ function buildCategoryChoices(categoryList) {
       .map((sub) => ({
         id: sub.id,
         label: `${group.name}: ${sub.name}`,
+        groupName: group.name,
         subName: sub.name,
         isHidden: Boolean(group.is_hidden || sub.is_hidden),
       }))
@@ -724,11 +700,3 @@ byId('delete-account').addEventListener('click', () =>
     await reloadAccounts();
   })
 );
-
-// --- Start ---
-
-runAction(async () => {
-  const info = await getJson('/api/info');
-  byId('sample-banner').hidden = !info.isSampleData;
-  await reloadAccounts();
-});

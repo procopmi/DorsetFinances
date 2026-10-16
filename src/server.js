@@ -85,6 +85,35 @@ function optionalCategoryId(value) {
   return category.id;
 }
 
+const CATEGORY_KINDS = ['income', 'expense'];
+
+// Look-ups that also check the thing exists, so each route can stay short.
+
+function requireCategory(id) {
+  const category = db.getCategory(requireId(id));
+  if (!category) throw httpError(404, 'No such category');
+  return category;
+}
+
+// A top-level group (not a sub), e.g. as the target of a move.
+function requireGroup(id) {
+  const category = requireCategory(id);
+  if (category.parent_id !== null) throw httpError(400, `"${category.name}" is not a group`);
+  return category;
+}
+
+function requirePayee(id) {
+  const payee = db.getPayee(requireId(id));
+  if (!payee) throw httpError(404, 'No such payee');
+  return payee;
+}
+
+function requireCategoryNameFree(name, parentId, exceptId) {
+  if (db.categoryNameTaken(name, parentId, exceptId)) {
+    throw httpError(400, `There is already a category named "${name}" ${parentId === null ? 'among the groups' : 'in that group'}`);
+  }
+}
+
 // The register fields shared by "add" and "edit".
 function readTransactionFields(body) {
   return {
@@ -133,6 +162,100 @@ const apiRoutes = {
   'GET /api/payees': () => db.listPayees(),
 
   'GET /api/categories': () => db.listCategories(),
+
+  // --- Managing categories (the Categories screen) ---
+
+  // Adds a group ({name, kind}) or a sub ({name, parentId}). A sub always
+  // takes its group's kind, so only groups need one.
+  'POST /api/categories': (body) => {
+    const name = requireName(body.name);
+    let parentId = null;
+    let kind = body.kind;
+
+    if (body.parentId !== undefined && body.parentId !== null) {
+      const parent = requireGroup(body.parentId);
+      parentId = parent.id;
+      kind = parent.kind;
+    } else if (!CATEGORY_KINDS.includes(kind)) {
+      throw httpError(400, 'A group must be income or expense');
+    }
+
+    requireCategoryNameFree(name, parentId);
+    return { id: db.createCategory({ name, kind, parentId }) };
+  },
+
+  'POST /api/categories/rename': (body) => {
+    const category = requireCategory(body.id);
+    const name = requireName(body.name);
+    requireCategoryNameFree(name, category.parent_id, category.id);
+    db.renameCategory(category.id, name);
+    return { ok: true };
+  },
+
+  // Hiding keeps a category on old transactions but drops it from suggestions.
+  'POST /api/categories/set-hidden': (body) => {
+    db.setCategoryHidden(requireCategory(body.id).id, body.isHidden === true);
+    return { ok: true };
+  },
+
+  'POST /api/categories/move': (body) => {
+    const category = requireCategory(body.id);
+    if (category.parent_id === null) throw httpError(400, 'Only sub-categories can be moved');
+    const target = requireGroup(body.parentId);
+    if (target.id === category.parent_id) throw httpError(400, 'It is already in that group');
+    requireCategoryNameFree(category.name, target.id);
+    db.moveCategory(category.id, target.id);
+    return { ok: true };
+  },
+
+  // The page asks for confirmation before calling this.
+  'POST /api/categories/delete': (body) => {
+    const category = requireCategory(body.id);
+    if (category.parent_id === null && db.countSubcategories(category.id) > 0) {
+      throw httpError(400, `"${category.name}" still has sub-categories. Delete or move them first, or hide the group.`);
+    }
+    // Deleting a used category would leave those transactions without one,
+    // so refuse; hiding is the safe way to retire it.
+    const count = db.countCategoryTransactions(category.id);
+    if (count > 0) {
+      throw httpError(400, `"${category.name}" is used by ${count} transaction(s). Hide it instead.`);
+    }
+    db.deleteCategory(category.id);
+    return { ok: true };
+  },
+
+  // --- Managing payees (the Payees screen) ---
+
+  'GET /api/payees/all': () => db.listPayeesWithUsage(),
+
+  'POST /api/payees/rename': (body) => {
+    const payee = requirePayee(body.id);
+    const name = requireName(body.name);
+    // Two payees with one name would be confusing; joining them is what Merge is for.
+    if (db.payeeNameTaken(name, payee.id)) {
+      throw httpError(400, `A payee named "${name}" already exists. Use Merge to combine them.`);
+    }
+    db.renamePayee(payee.id, name);
+    return { ok: true };
+  },
+
+  'POST /api/payees/set-hidden': (body) => {
+    db.setPayeeHidden(requirePayee(body.id).id, body.isHidden === true);
+    return { ok: true };
+  },
+
+  'POST /api/payees/set-default-category': (body) => {
+    db.setPayeeDefaultCategory(requirePayee(body.id).id, optionalCategoryId(body.categoryId));
+    return { ok: true };
+  },
+
+  // The page asks for confirmation before calling this.
+  'POST /api/payees/merge': (body) => {
+    const from = requirePayee(body.fromId);
+    const into = requirePayee(body.intoId);
+    if (from.id === into.id) throw httpError(400, 'Choose a different payee to merge into');
+    return { moved: db.mergePayees(from.id, into.id) };
+  },
 
   'POST /api/transactions': (body) => {
     const accountId = requireId(body.accountId);
