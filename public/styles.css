@@ -305,6 +305,17 @@ button.danger {
   background: #f8fafc;
 }
 
+/* The Clr mark is its own click target (toggles cleared). */
+.register-grid td.clr-toggle {
+  font-weight: 600;
+}
+
+.register-grid td.clr-toggle:hover {
+  background: var(--selected-bg);
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+
 .transaction-row:focus {
   outline: 2px solid var(--focus);
   outline-offset: -2px;

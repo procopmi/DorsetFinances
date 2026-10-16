@@ -69,8 +69,11 @@
       <div class="register-header">
         <h2 id="register-title">Register</h2>
         <span id="register-balance" class="register-balance"></span>
+        <!-- What the bank should show: compare with your online balance. -->
+        <span id="cleared-balance" class="register-balance" title="Opening balance plus cleared (c) and reconciled (R) items"></span>
         <!-- Actions for the selected account; hidden when none is selected. -->
         <div id="account-actions" class="account-actions" hidden>
+          <button type="button" id="reconcile-cleared" title="Use when the Cleared figure matches your bank">Mark cleared as reconciled</button>
           <button type="button" id="rename-account">Rename</button>
           <button type="button" id="toggle-closed">Close account</button>
           <button type="button" id="delete-account" class="danger">Delete</button>
@@ -97,7 +100,7 @@
       <p id="entry-error" class="form-error" hidden></p>
       <p class="muted keyboard-hint">
         Tab moves between fields · Enter saves · Esc cancels ·
-        Shift+Tab from the new row reaches the list, then ↑/↓ move, Enter edits, Delete removes
+        Shift+Tab from the new row reaches the list, then ↑/↓ move, Enter edits, Space marks cleared, Delete removes
       </p>
       <!-- Suggestions for the Payee and Category boxes, filled in by register.js. -->
       <datalist id="payee-options"></datalist>

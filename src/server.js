@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { dbPath, isSampleData, HOST, PORT, publicDir } from './config.js';
 import * as db from './db.js';
-import { runningBalances } from './money.js';
+import { runningBalances, clearedBalance } from './money.js';
 
 // --- Input checks ---
 //
@@ -86,6 +86,7 @@ function optionalCategoryId(value) {
 }
 
 const CATEGORY_KINDS = ['income', 'expense'];
+const TRANSACTION_STATUSES = ['uncleared', 'cleared', 'reconciled'];
 
 // Look-ups that also check the thing exists, so each route can stay short.
 
@@ -155,8 +156,27 @@ const apiRoutes = {
     return {
       openingBalanceCents: account.opening_balance_cents,
       openingDate: account.opening_date,
+      // What the bank should show; compare it with your online balance.
+      clearedBalanceCents: clearedBalance(account.opening_balance_cents, rows),
       rows: rows.map((row, i) => ({ ...row, balance_cents: balances[i] })),
     };
+  },
+
+  // Set one transaction to uncleared, cleared or reconciled.
+  'POST /api/transactions/set-status': (body) => {
+    if (!TRANSACTION_STATUSES.includes(body.status)) throw httpError(400, 'Unknown status');
+    if (!db.setTransactionStatus(requireId(body.id), body.status)) {
+      throw httpError(404, 'No such transaction');
+    }
+    return { ok: true };
+  },
+
+  // Marks every cleared transaction in an account as reconciled. The page
+  // asks first, showing the cleared balance to compare with the bank.
+  'POST /api/accounts/reconcile-cleared': (body) => {
+    const accountId = requireId(body.accountId);
+    if (!db.getAccount(accountId)) throw httpError(404, 'No such account');
+    return { count: db.reconcileCleared(accountId) };
   },
 
   'GET /api/payees': () => db.listPayees(),

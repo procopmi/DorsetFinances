@@ -346,6 +346,26 @@ export function updateTransaction(
   });
 }
 
+// status is 'uncleared', 'cleared' or 'reconciled' (the server checks).
+export function setTransactionStatus(id, status) {
+  return (
+    db
+      .prepare(`UPDATE transactions SET status = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(status, id).changes > 0
+  );
+}
+
+// Locks in everything currently cleared in one account, once you've checked
+// the cleared balance against the bank. Returns how many rows changed.
+export function reconcileCleared(accountId) {
+  return db
+    .prepare(
+      `UPDATE transactions SET status = 'reconciled', updated_at = datetime('now')
+        WHERE account_id = ? AND status = 'cleared'`
+    )
+    .run(accountId).changes;
+}
+
 export function deleteTransaction(id) {
   return db.prepare('DELETE FROM transactions WHERE id = ?').run(id).changes > 0;
 }

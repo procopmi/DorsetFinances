@@ -112,6 +112,7 @@ function showRegisterMessage(message) {
   row.append(td);
   byId('register-rows').replaceChildren(row);
   byId('register-balance').textContent = '';
+  byId('cleared-balance').textContent = '';
 }
 
 // Register state, alongside `accounts` and `selectedId` above:
@@ -236,11 +237,23 @@ function renderRows() {
   hideEntryError();
 
   // The current balance is the last row's balance (or the opening balance if
-  // there are no transactions yet).
+  // there are no transactions yet). The cleared balance comes from the server
+  // and is the one to compare with your bank's online balance.
   const current = register.rows.at(-1)?.balance_cents ?? register.openingBalanceCents;
-  const balanceText = byId('register-balance');
-  balanceText.textContent = `Balance: ${formatCents(current)}`;
-  balanceText.classList.toggle('negative', current < 0);
+  showAmount('register-balance', 'Balance', current);
+  showAmount('cleared-balance', 'Cleared', register.clearedBalanceCents);
+
+  // "Mark cleared as reconciled" only makes sense when something is cleared.
+  const lockButton = byId('reconcile-cleared');
+  lockButton.hidden = !canEdit;
+  lockButton.disabled = !register.rows.some((r) => r.status === 'cleared');
+}
+
+// Shows "Label: 1,234.56" in a header element, in red when below zero.
+function showAmount(elementId, label, cents) {
+  const element = byId(elementId);
+  element.textContent = `${label}: ${formatCents(cents)}`;
+  element.classList.toggle('negative', cents < 0);
 }
 
 // One signed amount shown across two columns: money out (negative) appears as
@@ -257,6 +270,7 @@ function buildViewRow(t, canEdit) {
   const row = document.createElement('tr');
   row.className = 'transaction-row';
   row.dataset.id = t.id;
+  const clrCell = cell(STATUS_MARKS[t.status], 'col-clr');
   row.append(
     cell(t.date),
     cell(t.check_number),
@@ -264,12 +278,21 @@ function buildViewRow(t, canEdit) {
     cell(t.category),
     cell(t.memo),
     cell(outflow, 'col-money'),
-    cell(STATUS_MARKS[t.status], 'col-clr'),
+    clrCell,
     cell(inflow, 'col-money'),
     balanceCell(t.balance_cents)
   );
 
   if (canEdit) {
+    // Clicking the Clr mark toggles cleared, like ticking a paper register.
+    // stopPropagation keeps that click from also opening the row for editing.
+    clrCell.classList.add('clr-toggle');
+    clrCell.title = 'Click (or press Space) to mark cleared / not cleared';
+    clrCell.addEventListener('click', (event) => {
+      event.stopPropagation();
+      runAction(() => toggleCleared(t));
+    });
+
     // "Roving tabindex": only one transaction row is reachable with Tab, so
     // tabbing doesn't stop on every row; ↑/↓ move between rows from there.
     row.tabIndex = t.id === (focusedRowId ?? currentRegister.rows.at(-1)?.id) ? 0 : -1;
@@ -282,7 +305,7 @@ function buildViewRow(t, canEdit) {
 }
 
 // Keyboard control of the transaction lines (when a line, not an input, has
-// focus): ↑/↓ move, Enter edits, Delete removes.
+// focus): ↑/↓ move, Enter edits, Space toggles cleared, Delete removes.
 byId('register-rows').addEventListener('keydown', (event) => {
   const row = event.target;
   if (!row.classList?.contains('transaction-row')) return;
@@ -300,11 +323,49 @@ byId('register-rows').addEventListener('keydown', (event) => {
   } else if (event.key === 'Enter') {
     event.preventDefault();
     startEdit(t);
+  } else if (event.key === ' ') {
+    event.preventDefault(); // Space would otherwise scroll the page
+    runAction(() => toggleCleared(t));
   } else if (event.key === 'Delete' || event.key === 'Backspace') {
     event.preventDefault();
     runAction(() => deleteTransaction(t));
   }
 });
+
+// --- Cleared and reconciled ---
+
+// Blank ↔ c. A reconciled (R) item is locked, so it asks before unlocking it
+// back to cleared.
+async function toggleCleared(t) {
+  let status;
+  if (t.status === 'reconciled') {
+    if (!confirm('This transaction is reconciled. Unlock it (set it back to cleared)?')) return;
+    status = 'cleared';
+  } else {
+    status = t.status === 'cleared' ? 'uncleared' : 'cleared';
+  }
+
+  await postJson('/api/transactions/set-status', { id: t.id, status });
+  focusedRowId = t.id;
+  await loadRegister();
+  // Keep your place, so you can work down the list pressing ↓ and Space.
+  document.querySelector(`.transaction-row[data-id="${t.id}"]`)?.focus();
+}
+
+// Once the Cleared figure matches your bank's online balance, lock in every
+// cleared item as reconciled (R), which makes it ask before later edits.
+byId('reconcile-cleared').addEventListener('click', () =>
+  runAction(async () => {
+    const count = currentRegister.rows.filter((r) => r.status === 'cleared').length;
+    const message =
+      `Cleared balance is ${formatCents(currentRegister.clearedBalanceCents)}.\n\n` +
+      `If this matches your bank, ${count} cleared transaction(s) will be marked R (reconciled).`;
+    if (!confirm(message)) return;
+
+    await postJson('/api/accounts/reconcile-cleared', { accountId: selectedId });
+    await loadRegister();
+  })
+);
 
 // --- Entering and editing transactions ---
 

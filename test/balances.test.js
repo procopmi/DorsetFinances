@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runningBalances } from '../src/money.js';
+import { runningBalances, clearedBalance } from '../src/money.js';
 import * as db from '../src/db.js';
 
 test('an account with no transactions has no balance rows', () => {
@@ -29,6 +29,34 @@ test('credit card: charges make the balance more negative, payments bring it bac
 test('balances refuse anything that is not whole cents', () => {
   assert.throws(() => runningBalances(10.5, [100]));
   assert.throws(() => runningBalances(0, [100, 0.1]));
+});
+
+// --- Cleared balance (what the bank should show) ---
+
+// Shorthand for a transaction as the register returns it.
+const t = (amount_cents, status) => ({ amount_cents, status });
+
+test('cleared balance with nothing cleared is the opening balance', () => {
+  assert.equal(clearedBalance(245000, []), 245000);
+  assert.equal(clearedBalance(245000, [t(-5000, 'uncleared'), t(10000, 'uncleared')]), 245000);
+});
+
+test('cleared balance counts cleared and reconciled items, not uncleared ones', () => {
+  // 100.00 opening; -25.00 cleared; +50.00 reconciled; -10.00 not yet at the bank.
+  assert.equal(
+    clearedBalance(10000, [t(-2500, 'cleared'), t(5000, 'reconciled'), t(-1000, 'uncleared')]),
+    12500
+  );
+});
+
+test('cleared balance on a credit card: charges owed, payment not yet posted', () => {
+  // Owes 312.45; a 50.00 charge has posted; a 312.45 payment hasn't yet.
+  assert.equal(clearedBalance(-31245, [t(-5000, 'cleared'), t(31245, 'uncleared')]), -36245);
+});
+
+test('cleared balance refuses anything that is not whole cents', () => {
+  assert.throws(() => clearedBalance(10.5, []));
+  assert.throws(() => clearedBalance(0, [t(0.1, 'cleared')]));
 });
 
 test('register order: by date, then by entry order within the same day', () => {

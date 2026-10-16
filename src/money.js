@@ -75,3 +75,24 @@ export function runningBalances(openingCents, amountsCents) {
     return balance;
   });
 }
+
+// What the bank should be showing: the opening balance plus every transaction
+// the bank has already processed (status "cleared" or "reconciled").
+// Uncleared items, like a check that hasn't been cashed yet, are left out.
+// Compare this with your bank's online balance.
+//   clearedBalance(1000, [{ amount_cents: -250, status: 'cleared' },
+//                         { amount_cents: -100, status: 'uncleared' }]) -> 750
+export function clearedBalance(openingCents, transactions) {
+  if (!Number.isSafeInteger(openingCents)) {
+    throw new Error(`clearedBalance expects whole cents, got ${openingCents}`);
+  }
+
+  let balance = openingCents;
+  for (const { amount_cents: amount, status } of transactions) {
+    if (!Number.isSafeInteger(amount)) {
+      throw new Error(`clearedBalance expects whole cents, got ${amount}`);
+    }
+    if (status === 'cleared' || status === 'reconciled') balance += amount;
+  }
+  return balance;
+}
