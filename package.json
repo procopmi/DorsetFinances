@@ -1,0 +1,14 @@
+{
+  "name": "dorset-finances",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-only household finance app: checkbook registers, budgets, reports.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  }
+}

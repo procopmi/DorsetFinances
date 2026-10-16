@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/FinanceData/**)",
+      "Edit(~/FinanceData/**)",
+      "Read(./.env)"
+    ],
+    "ask": [
+      "Bash(rm *)"
+    ]
+  }
+}

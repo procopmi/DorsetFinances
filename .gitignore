@@ -1,0 +1,17 @@
+# Database files. Real data lives in ~/FinanceData, outside this repo, but we
+# ignore every .db file anyway so no database can ever be committed by mistake.
+# The -journal/-wal/-shm files are SQLite's temporary companions to a .db file.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Secrets and machine-specific settings.
+.env
+.claude/settings.local.json
+
+# Backup copies of the data file.
+backups/
+
+# macOS folder metadata.
+.DS_Store

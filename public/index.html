@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dorset Finances</title>
+  <link rel="stylesheet" href="/styles.css">
+  <!-- type="module" lets register.js use import/export, and runs it after the
+       page has loaded, so it can find the elements below. -->
+  <script type="module" src="/register.js"></script>
+</head>
+<body>
+  <!-- Shown only when the server says it's using the sample database, so
+       it's always obvious whether you're looking at real money. -->
+  <div id="sample-banner" class="sample-banner" hidden>SAMPLE DATA, not your real accounts</div>
+
+  <header class="app-header">
+    <h1>Dorset Finances</h1>
+  </header>
+
+  <main class="layout">
+    <aside class="accounts">
+      <h2>Accounts</h2>
+      <ul id="account-list"></ul>
+      <p id="no-accounts" class="muted" hidden>No accounts yet.</p>
+    </aside>
+
+    <section class="register">
+      <h2 id="register-title">Register</h2>
+      <table class="register-grid">
+        <thead>
+          <tr>
+            <th class="col-date">Date</th>
+            <th class="col-num">Num</th>
+            <th class="col-payee">Payee</th>
+            <th class="col-category">Category</th>
+            <th class="col-memo">Memo</th>
+            <th class="col-money">Payment</th>
+            <th class="col-clr" title="Cleared">Clr</th>
+            <th class="col-money">Deposit</th>
+            <th class="col-money">Balance</th>
+          </tr>
+        </thead>
+        <tbody id="register-rows">
+          <tr class="empty-row"><td colspan="9">No transactions.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
