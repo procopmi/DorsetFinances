@@ -7,6 +7,8 @@
   --header-bg: #eef1f5;
   --banner-bg: #fde68a;
   --banner-text: #78350f;
+  --selected-bg: #dbeafe;
+  --danger: #b91c1c;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   color: #1f2937;
@@ -15,6 +17,12 @@
 body {
   margin: 0;
   background: #fff;
+}
+
+/* The page shows and hides things with the "hidden" attribute. Without this,
+   any element given display:flex below would ignore "hidden" and stay visible. */
+[hidden] {
+  display: none !important;
 }
 
 .sample-banner {
@@ -50,10 +58,88 @@ h2 {
   flex: 0 0 200px;
 }
 
-.accounts ul {
+.accounts h3 {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 16px 0 4px;
+}
+
+.account-list {
   list-style: none;
-  margin: 0;
+  margin: 0 0 8px;
   padding: 0;
+}
+
+/* Account names are buttons (for keyboard use) styled to look like a list. */
+.account-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.account-button:hover {
+  background: var(--header-bg);
+}
+
+.account-button.selected {
+  background: var(--selected-bg);
+  font-weight: 600;
+}
+
+.account-list.closed .account-button {
+  color: var(--muted);
+}
+
+.add-account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.add-account-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.add-account-form input,
+.add-account-form select {
+  font: inherit;
+  padding: 3px 4px;
+}
+
+.form-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.form-error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.register-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+}
+
+button.danger {
+  color: var(--danger);
 }
 
 .register {

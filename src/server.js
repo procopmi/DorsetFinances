@@ -9,16 +9,103 @@ import http from 'node:http';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { dbPath, isSampleData, HOST, PORT, publicDir } from './config.js';
 import * as db from './db.js';
 
-// The API: each "METHOD /path" maps to a function whose return value is sent
-// back to the browser as JSON. New milestones add lines here.
+// --- Input checks ---
+//
+// The browser checks input too, but the server checks again: it is the last
+// stop before the database, so it must never trust what it's sent.
+
+const ACCOUNT_TYPES = ['checking', 'savings', 'credit_card'];
+
+// An Error carrying an HTTP status code. 400 means "your request was wrong";
+// 404 means "no such thing". Anything without a status is reported as 500,
+// meaning "the server itself hit a problem".
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function requireId(value) {
+  if (!Number.isSafeInteger(value) || value <= 0) throw httpError(400, 'Invalid id');
+  return value;
+}
+
+function requireName(value) {
+  if (typeof value !== 'string' || value.trim() === '') throw httpError(400, 'A name is required');
+  return value.trim();
+}
+
+// Money must arrive as whole cents. A decimal here means a bug somewhere.
+function requireCents(value) {
+  if (!Number.isSafeInteger(value)) throw httpError(400, 'Amount must be whole cents');
+  return value;
+}
+
+// 'YYYY-MM-DD', and a real calendar date (rejects 2026-02-30).
+function requireDate(value) {
+  const isRealDate =
+    typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+  if (!isRealDate) throw httpError(400, `"${value}" is not a valid date`);
+  return value;
+}
+
+// --- API routes ---
+//
+// Each "METHOD /path" maps to a function. POST routes receive the parsed JSON
+// body; whatever the function returns is sent back to the browser as JSON.
+// Ids travel in the body (not the URL) so this table can stay a simple lookup.
+
 const apiRoutes = {
   'GET /api/info': () => ({ isSampleData }),
+
   'GET /api/accounts': () => db.listAccounts(),
+
+  'POST /api/accounts': (body) => {
+    if (!ACCOUNT_TYPES.includes(body.type)) throw httpError(400, 'Unknown account type');
+    const id = db.createAccount({
+      name: requireName(body.name),
+      type: body.type,
+      openingBalanceCents: requireCents(body.openingBalanceCents),
+      openingDate: requireDate(body.openingDate),
+    });
+    return { id };
+  },
+
+  'POST /api/accounts/rename': (body) => {
+    if (!db.renameAccount(requireId(body.id), requireName(body.name))) {
+      throw httpError(404, 'No such account');
+    }
+    return { ok: true };
+  },
+
+  'POST /api/accounts/set-closed': (body) => {
+    if (!db.setAccountClosed(requireId(body.id), body.isClosed === true)) {
+      throw httpError(404, 'No such account');
+    }
+    return { ok: true };
+  },
+
+  'POST /api/accounts/delete': (body) => {
+    const id = requireId(body.id);
+    // Deleting an account with history would destroy that history, so refuse
+    // and point to closing instead, which hides it but keeps everything.
+    const count = db.countTransactions(id);
+    if (count > 0) {
+      throw httpError(400, `This account has ${count} transaction(s). Close it instead of deleting it.`);
+    }
+    if (!db.deleteAccount(id)) throw httpError(404, 'No such account');
+    return { ok: true };
+  },
 };
+
+// --- Request plumbing ---
 
 // The browser decides how to treat a file based on this header, so each file
 // type we serve needs its matching value.
@@ -28,20 +115,46 @@ const contentTypes = {
   '.js': 'text/javascript; charset=utf-8',
 };
 
+// Files outside public/ that the browser is allowed to load. money.js is
+// shared so the page parses and formats amounts with exactly the same (tested)
+// code as the server. Listing files one by one keeps the rest of src/ private.
+const sharedFiles = {
+  '/money.js': fileURLToPath(new URL('./money.js', import.meta.url)),
+};
+
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
 }
 
-async function serveStaticFile(res, urlPath) {
-  const relative = urlPath === '/' ? 'index.html' : urlPath.slice(1);
-  const filePath = path.join(publicDir, relative);
+async function readJsonBody(req) {
+  let text = '';
+  for await (const chunk of req) text += chunk;
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw httpError(400, 'Request body is not valid JSON');
+  }
+  // Every route expects an object like {"id": 3}, so reject anything else
+  // (such as a bare number or null) up front.
+  if (typeof body !== 'object' || body === null) throw httpError(400, 'Request body must be a JSON object');
+  return body;
+}
 
-  // Refuse paths like "/../src/config.js" that try to climb out of public/.
-  // Only files inside public/ are ever sent to the browser.
-  if (!filePath.startsWith(publicDir + path.sep)) {
-    res.writeHead(404).end('Not found');
-    return;
+async function serveStaticFile(res, urlPath) {
+  let filePath = sharedFiles[urlPath];
+
+  if (!filePath) {
+    const relative = urlPath === '/' ? 'index.html' : urlPath.slice(1);
+    filePath = path.join(publicDir, relative);
+
+    // Refuse paths like "/../src/config.js" that try to climb out of public/.
+    // Only files inside public/ (plus sharedFiles) are ever sent to the browser.
+    if (!filePath.startsWith(publicDir + path.sep)) {
+      res.writeHead(404).end('Not found');
+      return;
+    }
   }
 
   try {
@@ -54,19 +167,43 @@ async function serveStaticFile(res, urlPath) {
   }
 }
 
+// Two guards against other websites open in your browser reaching this server.
+// Even though the server only listens on this Mac, any web page you visit can
+// try to send requests to 127.0.0.1.
+function isTrustedRequest(req) {
+  // 1. The Host header must be our own address. This blocks a trick called
+  //    "DNS rebinding", where a hostile site's domain is pointed at 127.0.0.1.
+  const allowedHosts = [`127.0.0.1:${PORT}`, `localhost:${PORT}`];
+  if (!allowedHosts.includes(req.headers.host)) return false;
+
+  // 2. Changes (POST) must be sent as JSON. Browsers won't let another site
+  //    send a JSON POST to us without first asking permission, and this server
+  //    never grants it, so only our own page can make changes.
+  if (req.method === 'POST' && !req.headers['content-type']?.startsWith('application/json')) {
+    return false;
+  }
+  return true;
+}
+
 async function handleRequest(req, res) {
+  if (!isTrustedRequest(req)) {
+    res.writeHead(403).end('Forbidden');
+    return;
+  }
+
   // req.url includes any "?query" part; we only route on the path.
   const { pathname } = new URL(req.url, `http://${HOST}`);
   const handler = apiRoutes[`${req.method} ${pathname}`];
 
   if (handler) {
     try {
-      sendJson(res, 200, handler(req));
+      const body = req.method === 'POST' ? await readJsonBody(req) : undefined;
+      sendJson(res, 200, handler(body));
     } catch (err) {
-      // Log the full error here in the terminal, but send the browser only the
-      // message, so it can show something useful without crashing the server.
-      console.error(err);
-      sendJson(res, 500, { error: err.message });
+      // Expected problems (bad input, missing account) carry a status and just
+      // send their message. Anything else is a bug: log it in the terminal.
+      if (!err.status) console.error(err);
+      sendJson(res, err.status ?? 500, { error: err.message });
     }
   } else if (pathname.startsWith('/api/')) {
     sendJson(res, 404, { error: `No API route for ${req.method} ${pathname}` });

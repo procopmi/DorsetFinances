@@ -26,14 +26,57 @@ export function openDb(filePath) {
   db.exec(schema);
 }
 
-// Open accounts, in the order they should appear in the sidebar.
+// --- Accounts ---
+//
+// The "?" placeholders below are filled in by SQLite from the values passed to
+// run()/get(). Never build SQL by gluing strings together: placeholders keep a
+// value like "Bob's Checking" (note the quote) from breaking the query.
+
+// All accounts, open ones first, in the order they should appear in the sidebar.
+// Closed accounts are included so the sidebar can offer to reopen them.
 export function listAccounts() {
   return db
     .prepare(
-      `SELECT id, name, type, opening_balance_cents, opening_date, sort_order
+      `SELECT id, name, type, opening_balance_cents, opening_date, is_closed, sort_order
          FROM accounts
-        WHERE is_closed = 0
-        ORDER BY sort_order, name`
+        ORDER BY is_closed, sort_order, name`
     )
     .all();
+}
+
+// Adds an account and returns its new id.
+export function createAccount({ name, type, openingBalanceCents, openingDate }) {
+  const result = db
+    .prepare(
+      `INSERT INTO accounts (name, type, opening_balance_cents, opening_date)
+       VALUES (?, ?, ?, ?)`
+    )
+    .run(name, type, openingBalanceCents, openingDate);
+  return Number(result.lastInsertRowid);
+}
+
+// The functions below return true if an account with that id existed, so the
+// caller can tell "done" apart from "no such account".
+
+export function renameAccount(id, name) {
+  return db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name, id).changes > 0;
+}
+
+// Closing hides an account from the main list but keeps all its history.
+export function setAccountClosed(id, isClosed) {
+  return (
+    db.prepare('UPDATE accounts SET is_closed = ? WHERE id = ?').run(isClosed ? 1 : 0, id).changes > 0
+  );
+}
+
+export function countTransactions(accountId) {
+  return db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE account_id = ?').get(accountId)
+    .count;
+}
+
+// Permanently removes an account. The database itself also refuses this if the
+// account still has transactions (the foreign key rule), so history can never
+// be orphaned even if a caller forgets to check countTransactions first.
+export function deleteAccount(id) {
+  return db.prepare('DELETE FROM accounts WHERE id = ?').run(id).changes > 0;
 }

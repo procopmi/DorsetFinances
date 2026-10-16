@@ -21,12 +21,52 @@
   <main class="layout">
     <aside class="accounts">
       <h2>Accounts</h2>
-      <ul id="account-list"></ul>
+      <ul id="account-list" class="account-list"></ul>
       <p id="no-accounts" class="muted" hidden>No accounts yet.</p>
+
+      <button type="button" id="show-add-account">+ Add account</button>
+
+      <!-- Hidden until "+ Add account" is clicked. Enter saves, Esc cancels. -->
+      <form id="add-account-form" class="add-account-form" hidden>
+        <label>Name
+          <input name="name" required autocomplete="off">
+        </label>
+        <label>Type
+          <select name="type">
+            <option value="checking">Checking</option>
+            <option value="savings">Savings</option>
+            <option value="credit_card">Credit card</option>
+          </select>
+        </label>
+        <label><span id="opening-balance-label">Opening balance</span>
+          <input name="openingBalance" inputmode="decimal" placeholder="0.00" autocomplete="off">
+        </label>
+        <label>As of date
+          <input name="openingDate" type="date" required>
+        </label>
+        <p id="add-account-error" class="form-error" hidden></p>
+        <div class="form-buttons">
+          <button type="submit">Save</button>
+          <button type="button" id="cancel-add-account">Cancel</button>
+        </div>
+      </form>
+
+      <div id="closed-accounts" hidden>
+        <h3>Closed</h3>
+        <ul id="closed-account-list" class="account-list closed"></ul>
+      </div>
     </aside>
 
     <section class="register">
-      <h2 id="register-title">Register</h2>
+      <div class="register-header">
+        <h2 id="register-title">Register</h2>
+        <!-- Actions for the selected account; hidden when none is selected. -->
+        <div id="account-actions" class="account-actions" hidden>
+          <button type="button" id="rename-account">Rename</button>
+          <button type="button" id="toggle-closed">Close account</button>
+          <button type="button" id="delete-account" class="danger">Delete</button>
+        </div>
+      </div>
       <table class="register-grid">
         <thead>
           <tr>
@@ -35,9 +75,9 @@
             <th class="col-payee">Payee</th>
             <th class="col-category">Category</th>
             <th class="col-memo">Memo</th>
-            <th class="col-money">Payment</th>
+            <th class="col-money" id="outflow-heading">Payment</th>
             <th class="col-clr" title="Cleared">Clr</th>
-            <th class="col-money">Deposit</th>
+            <th class="col-money" id="inflow-heading">Deposit</th>
             <th class="col-money">Balance</th>
           </tr>
         </thead>
