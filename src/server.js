@@ -47,14 +47,39 @@ function requireCents(value) {
   return value;
 }
 
-// 'YYYY-MM-DD', and a real calendar date (rejects 2026-02-30).
+// 'YYYY-MM-DD', and a real calendar date (rejects 2026-02-30 and 2026-13-01).
 function requireDate(value) {
+  const parsed = new Date(`${value}T00:00:00Z`);
   const isRealDate =
     typeof value === 'string' &&
     /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+    // An impossible month gives an "invalid date" (NaN); check before using it.
+    !Number.isNaN(parsed.getTime()) &&
+    // An impossible day like Feb 30 rolls over to Mar 2, so compare back.
+    parsed.toISOString().slice(0, 10) === value;
   if (!isRealDate) throw httpError(400, `"${value}" is not a valid date`);
   return value;
+}
+
+// Optional text such as a memo: blank becomes null (nothing stored), and very
+// long values are refused rather than silently cut short.
+function optionalText(value, label, maxLength) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw httpError(400, `${label} must be text`);
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) throw httpError(400, `${label} is too long (max ${maxLength})`);
+  return trimmed === '' ? null : trimmed;
+}
+
+// The register fields shared by "add" and "edit".
+function readTransactionFields(body) {
+  return {
+    date: requireDate(body.date),
+    checkNumber: optionalText(body.checkNumber, 'Check number', 20),
+    payeeName: optionalText(body.payee, 'Payee', 100),
+    memo: optionalText(body.memo, 'Memo', 200),
+    amountCents: requireCents(body.amountCents),
+  };
 }
 
 // --- API routes ---
@@ -88,6 +113,28 @@ const apiRoutes = {
       openingDate: account.opening_date,
       rows: rows.map((row, i) => ({ ...row, balance_cents: balances[i] })),
     };
+  },
+
+  'GET /api/payees': () => db.listPayees(),
+
+  'POST /api/transactions': (body) => {
+    const accountId = requireId(body.accountId);
+    if (!db.getAccount(accountId)) throw httpError(404, 'No such account');
+    const id = db.createTransaction({ accountId, ...readTransactionFields(body) });
+    return { id };
+  },
+
+  'POST /api/transactions/update': (body) => {
+    if (!db.updateTransaction(requireId(body.id), readTransactionFields(body))) {
+      throw httpError(404, 'No such transaction');
+    }
+    return { ok: true };
+  },
+
+  // The page asks for confirmation before calling this.
+  'POST /api/transactions/delete': (body) => {
+    if (!db.deleteTransaction(requireId(body.id))) throw httpError(404, 'No such transaction');
+    return { ok: true };
   },
 
   'POST /api/accounts': (body) => {

@@ -9,6 +9,7 @@
   --banner-text: #78350f;
   --selected-bg: #dbeafe;
   --danger: #b91c1c;
+  --focus: #2563eb;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   color: #1f2937;
@@ -175,7 +176,7 @@ button.danger {
   font-variant-numeric: tabular-nums;  /* every digit the same width */
 }
 
-.register-grid .col-date { width: 90px; }
+.register-grid .col-date { width: 120px; }  /* room for the date picker */
 .register-grid .col-num { width: 50px; }
 .register-grid .col-clr { width: 30px; text-align: center; }
 
@@ -194,6 +195,63 @@ button.danger {
 .opening-row td {
   color: var(--muted);
   font-style: italic;
+}
+
+/* Transaction lines: clickable, and clearly marked when they have keyboard focus. */
+.transaction-row {
+  cursor: pointer;
+}
+
+.transaction-row:hover td {
+  background: #f8fafc;
+}
+
+.transaction-row:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.transaction-row:focus td {
+  background: var(--selected-bg);
+}
+
+/* Rows of input fields (the entry row and a line being edited). The inputs
+   fill their cells so the row keeps the grid's shape. */
+.editor-row td {
+  padding: 1px 2px;
+  background: #fffbeb;
+}
+
+.editor-row input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.editor-row input:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.editor-row .money-input {
+  text-align: right;
+}
+
+button.small {
+  font-size: 12px;
+  padding: 1px 6px;
+}
+
+.keyboard-hint {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+#entry-error {
+  margin-top: 6px;
 }
 
 .empty-row td {

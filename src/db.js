@@ -92,25 +92,87 @@ export function deleteAccount(id) {
   return db.prepare('DELETE FROM accounts WHERE id = ?').run(id).changes > 0;
 }
 
+// --- Helpers ---
+
+// Runs several database writes as one all-or-nothing unit. (SQLite calls this
+// a "transaction", which is unrelated to a register transaction.) If anything
+// inside fails, ROLLBACK undoes the earlier writes too, so we never end up with,
+// say, a new payee saved but the register line that needed it missing.
+function allOrNothing(work) {
+  db.exec('BEGIN');
+  try {
+    const result = work();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// --- Payees ---
+
+// Payee names for autocomplete, alphabetically.
+export function listPayees() {
+  return db.prepare('SELECT id, name FROM payees WHERE is_hidden = 0 ORDER BY name').all();
+}
+
+// Returns the id of the payee with this name, creating it if it's new. The
+// name column ignores capitalization (COLLATE NOCASE in schema.sql), so
+// "pg&e" finds an existing "PG&E" instead of making a near-duplicate.
+function findOrCreatePayee(name) {
+  const existing = db.prepare('SELECT id FROM payees WHERE name = ?').get(name);
+  if (existing) return existing.id;
+  return Number(db.prepare('INSERT INTO payees (name) VALUES (?)').run(name).lastInsertRowid);
+}
+
 // --- Transactions ---
 
 // Adds a transaction and returns its new id. amountCents is signed:
-// positive = money in, negative = money out.
+// positive = money in, negative = money out. payeeName is plain text; the
+// matching payee is looked up or created here.
 export function createTransaction({
   accountId,
   date,
   amountCents,
+  payeeName = null,
   memo = null,
   checkNumber = null,
   status = 'uncleared',
 }) {
-  const result = db
-    .prepare(
-      `INSERT INTO transactions (account_id, date, amount_cents, memo, check_number, status)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(accountId, date, amountCents, memo, checkNumber, status);
-  return Number(result.lastInsertRowid);
+  return allOrNothing(() => {
+    const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
+    const result = db
+      .prepare(
+        `INSERT INTO transactions (account_id, date, amount_cents, payee_id, memo, check_number, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(accountId, date, amountCents, payeeId, memo, checkNumber, status);
+    return Number(result.lastInsertRowid);
+  });
+}
+
+// Changes the fields you can edit in the register. Status and category are
+// left as they are (they have their own controls). Returns false if there's
+// no transaction with that id.
+export function updateTransaction(id, { date, amountCents, payeeName = null, memo = null, checkNumber = null }) {
+  return allOrNothing(() => {
+    // Check first, so a missing transaction doesn't leave a new payee behind.
+    if (!db.prepare('SELECT 1 FROM transactions WHERE id = ?').get(id)) return false;
+
+    const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
+    db.prepare(
+      `UPDATE transactions
+          SET date = ?, amount_cents = ?, payee_id = ?, memo = ?, check_number = ?,
+              updated_at = datetime('now')
+        WHERE id = ?`
+    ).run(date, amountCents, payeeId, memo, checkNumber, id);
+    return true;
+  });
+}
+
+export function deleteTransaction(id) {
+  return db.prepare('DELETE FROM transactions WHERE id = ?').run(id).changes > 0;
 }
 
 // One account's transactions in register order: by date, and within the same

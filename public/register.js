@@ -82,6 +82,9 @@ function fillAccountList(list, items) {
     button.textContent = account.name;
     button.addEventListener('click', () => {
       selectedId = account.id;
+      // Leaving an account abandons any edit in progress there.
+      editingId = null;
+      focusedRowId = null;
       render();
     });
 
@@ -136,18 +139,54 @@ function showRegisterMessage(message) {
   byId('register-balance').textContent = '';
 }
 
+// Register state, alongside `accounts` and `selectedId` above:
+let currentRegister = null; // last data loaded from /api/register
+let editingId = null;       // id of the transaction open for editing, if any
+let focusedRowId = null;    // last transaction row you moved to with the keyboard
+let lastEnteredDate = null; // new rows start with this date (see newRowDate)
+
+// Fetches the selected account's register (and the payee list for
+// autocomplete), then redraws the grid.
 async function loadRegister() {
   const accountId = selectedId;
   if (accountId === null) {
+    currentRegister = null;
     showRegisterMessage('No account selected.');
     return;
   }
 
-  const register = await getJson(`/api/register?accountId=${accountId}`);
+  const [register, payees] = await Promise.all([
+    getJson(`/api/register?accountId=${accountId}`),
+    getJson('/api/payees'),
+  ]);
 
   // If you clicked another account while this was loading, a newer load is
   // already on its way; drop this one so the grid never shows the wrong account.
   if (accountId !== selectedId) return;
+
+  currentRegister = register;
+  fillPayeeOptions(payees);
+  renderRows();
+}
+
+// The browser's built-in suggestion list for the Payee field.
+function fillPayeeOptions(payees) {
+  const options = payees.map((payee) => {
+    const option = document.createElement('option');
+    option.value = payee.name;
+    return option;
+  });
+  byId('payee-options').replaceChildren(...options);
+}
+
+// Draws the grid from currentRegister: opening line, one line per
+// transaction (or input fields for the one being edited), and the blank
+// entry row at the bottom.
+function renderRows() {
+  const register = currentRegister;
+  const account = accounts.find((a) => a.id === selectedId);
+  // Closed accounts are read-only: reopen one to change it.
+  const canEdit = !account.is_closed;
 
   // The first row is the opening balance, like the top line of a checkbook.
   const openingRow = document.createElement('tr');
@@ -164,26 +203,13 @@ async function loadRegister() {
     balanceCell(register.openingBalanceCents)
   );
 
-  const rows = register.rows.map((t) => {
-    // One signed amount is split across two columns: money out (negative)
-    // shows as a positive number under Payment/Charge, money in under Deposit.
-    const isOutflow = t.amount_cents < 0;
-    const row = document.createElement('tr');
-    row.append(
-      cell(t.date),
-      cell(t.check_number),
-      cell(t.payee),
-      cell(t.category),
-      cell(t.memo),
-      cell(isOutflow ? formatCents(-t.amount_cents) : '', 'col-money'),
-      cell(STATUS_MARKS[t.status], 'col-clr'),
-      cell(isOutflow ? '' : formatCents(t.amount_cents), 'col-money'),
-      balanceCell(t.balance_cents)
-    );
-    return row;
-  });
+  const rows = register.rows.map((t) =>
+    canEdit && t.id === editingId ? buildEditRow(t) : buildViewRow(t, canEdit)
+  );
+  if (canEdit) rows.push(buildNewRow());
 
   byId('register-rows').replaceChildren(openingRow, ...rows);
+  hideEntryError();
 
   // The current balance is the last row's balance (or the opening balance if
   // there are no transactions yet).
@@ -191,6 +217,324 @@ async function loadRegister() {
   const balanceText = byId('register-balance');
   balanceText.textContent = `Balance: ${formatCents(current)}`;
   balanceText.classList.toggle('negative', current < 0);
+}
+
+// One signed amount shown across two columns: money out (negative) appears as
+// a positive number under Payment/Charge, money in under Deposit.
+function splitAmount(amountCents) {
+  return amountCents < 0
+    ? { outflow: formatCents(-amountCents), inflow: '' }
+    : { outflow: '', inflow: formatCents(amountCents) };
+}
+
+// A plain (not being edited) transaction line.
+function buildViewRow(t, canEdit) {
+  const { outflow, inflow } = splitAmount(t.amount_cents);
+  const row = document.createElement('tr');
+  row.className = 'transaction-row';
+  row.dataset.id = t.id;
+  row.append(
+    cell(t.date),
+    cell(t.check_number),
+    cell(t.payee),
+    cell(t.category),
+    cell(t.memo),
+    cell(outflow, 'col-money'),
+    cell(STATUS_MARKS[t.status], 'col-clr'),
+    cell(inflow, 'col-money'),
+    balanceCell(t.balance_cents)
+  );
+
+  if (canEdit) {
+    // "Roving tabindex": only one transaction row is reachable with Tab, so
+    // tabbing doesn't stop on every row; ↑/↓ move between rows from there.
+    row.tabIndex = t.id === (focusedRowId ?? currentRegister.rows.at(-1)?.id) ? 0 : -1;
+    row.addEventListener('click', () => startEdit(t));
+    row.addEventListener('focus', () => {
+      focusedRowId = t.id;
+    });
+  }
+  return row;
+}
+
+// Keyboard control of the transaction lines (when a line, not an input, has
+// focus): ↑/↓ move, Enter edits, Delete removes.
+byId('register-rows').addEventListener('keydown', (event) => {
+  const row = event.target;
+  if (!row.classList?.contains('transaction-row')) return;
+
+  const t = currentRegister.rows.find((r) => r.id === Number(row.dataset.id));
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    event.preventDefault(); // stop the page scrolling instead
+    const next = event.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling;
+    if (next?.classList.contains('transaction-row')) {
+      next.focus();
+    } else if (next?.classList.contains('editor-row')) {
+      // Down from the last line lands in the entry row.
+      next.querySelector('input').focus();
+    }
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    startEdit(t);
+  } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault();
+    runAction(() => deleteTransaction(t));
+  }
+});
+
+// --- Entering and editing transactions ---
+
+// New rows start with the last date you entered (handy when typing in a run
+// of transactions from one statement), or today if you haven't entered any.
+function newRowDate() {
+  return lastEnteredDate ?? todayText();
+}
+
+// Builds a row of input fields. `values` holds the starting text for each
+// field; `onSave`/`onCancel` run on Enter/Esc. Returns the <tr> and its inputs.
+function buildEditorRow(values, statusMark, { onSave, onCancel }) {
+  const makeInput = (name, extra = {}) => {
+    const input = document.createElement('input');
+    input.name = name;
+    input.autocomplete = 'off';
+    Object.assign(input, extra);
+    return input;
+  };
+
+  const fields = {
+    date: makeInput('date', { type: 'date', value: values.date }),
+    checkNumber: makeInput('checkNumber', { value: values.checkNumber ?? '' }),
+    payee: makeInput('payee', { value: values.payee ?? '' }),
+    // Categories arrive in milestone 5; the box is here so the layout is final.
+    category: makeInput('category', { disabled: true, placeholder: 'later' }),
+    memo: makeInput('memo', { value: values.memo ?? '' }),
+    outflow: makeInput('outflow', { value: values.outflow ?? '', inputMode: 'decimal', className: 'money-input' }),
+    inflow: makeInput('inflow', { value: values.inflow ?? '', inputMode: 'decimal', className: 'money-input' }),
+  };
+  // Connects the field to the <datalist> of payee names in index.html.
+  fields.payee.setAttribute('list', 'payee-options');
+
+  // An amount goes in one column or the other, so typing in one clears the other.
+  fields.outflow.addEventListener('input', () => {
+    if (fields.outflow.value !== '') fields.inflow.value = '';
+  });
+  fields.inflow.addEventListener('input', () => {
+    if (fields.inflow.value !== '') fields.outflow.value = '';
+  });
+
+  const wrap = (input, className) => {
+    const td = document.createElement('td');
+    if (className) td.className = className;
+    td.append(input);
+    return td;
+  };
+
+  const row = document.createElement('tr');
+  row.className = 'editor-row';
+  const actionsCell = cell('', 'col-money');
+  row.append(
+    wrap(fields.date),
+    wrap(fields.checkNumber),
+    wrap(fields.payee),
+    wrap(fields.category),
+    wrap(fields.memo),
+    wrap(fields.outflow, 'col-money'),
+    cell(statusMark, 'col-clr'),
+    wrap(fields.inflow, 'col-money'),
+    actionsCell
+  );
+
+  row.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+    } else if (event.key === 'Enter') {
+      // On the Delete button, Enter should press the button, not save.
+      if (event.target.tagName === 'BUTTON') return;
+      event.preventDefault();
+      if (event.target === fields.payee) {
+        // In the Payee box, Enter accepts the suggestion and moves on to Memo,
+        // rather than saving before you've finished the line.
+        fields.memo.focus();
+      } else {
+        runAction(onSave);
+      }
+    }
+  });
+
+  return { row, fields, actionsCell };
+}
+
+// The blank entry row at the bottom of the register.
+function buildNewRow() {
+  const { row, fields } = buildEditorRow({ date: newRowDate() }, '', {
+    onSave: () => saveNewTransaction(fields),
+    onCancel: () => {
+      // Esc empties the row but keeps the date.
+      for (const [name, input] of Object.entries(fields)) {
+        if (name !== 'date') input.value = '';
+      }
+      hideEntryError();
+    },
+  });
+  row.id = 'new-row';
+  return row;
+}
+
+// An existing transaction opened for editing, with a Delete button.
+function buildEditRow(t) {
+  const { row, fields, actionsCell } = buildEditorRow(
+    {
+      date: t.date,
+      checkNumber: t.check_number,
+      payee: t.payee,
+      memo: t.memo,
+      ...splitAmount(t.amount_cents),
+    },
+    STATUS_MARKS[t.status],
+    {
+      onSave: () => saveEditedTransaction(t, fields),
+      onCancel: () => stopEditing(t.id),
+    }
+  );
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'danger small';
+  deleteButton.textContent = 'Delete';
+  deleteButton.addEventListener('click', () => runAction(() => deleteTransaction(t)));
+  actionsCell.append(deleteButton);
+  return row;
+}
+
+// Reads the input fields into what the server expects. Problems are thrown as
+// Errors with a `field` to put the cursor back in.
+function readFields(fields) {
+  const problem = (message, field) => Object.assign(new Error(message), { field });
+  const outName = byId('outflow-heading').textContent;
+  const inName = byId('inflow-heading').textContent;
+
+  if (!fields.date.value) throw problem('Enter a date.', fields.date);
+
+  const outText = fields.outflow.value.trim();
+  const inText = fields.inflow.value.trim();
+  if (!outText && !inText) throw problem(`Enter an amount under ${outName} or ${inName}.`, fields.outflow);
+
+  const amountField = outText ? fields.outflow : fields.inflow;
+  let cents;
+  try {
+    cents = parseDollarsToCents(outText || inText);
+  } catch (err) {
+    throw problem(err.message, amountField);
+  }
+  // The column says which way the money moved, so a minus sign would be
+  // ambiguous. Ask for the other column instead.
+  if (cents < 0) {
+    throw problem(`Leave out the minus sign; use the ${outText ? inName : outName} column instead.`, amountField);
+  }
+
+  return {
+    date: fields.date.value,
+    checkNumber: fields.checkNumber.value,
+    payee: fields.payee.value,
+    memo: fields.memo.value,
+    amountCents: outText ? -cents : cents,
+  };
+}
+
+// Reads the fields, or shows the problem under the grid and returns null.
+function readFieldsOrShowError(fields) {
+  try {
+    return readFields(fields);
+  } catch (err) {
+    showEntryError(err.message);
+    err.field?.focus();
+    return null;
+  }
+}
+
+function showEntryError(message) {
+  const box = byId('entry-error');
+  box.textContent = message;
+  box.hidden = false;
+}
+
+function hideEntryError() {
+  byId('entry-error').hidden = true;
+}
+
+// Server-side problems (like a rejected date) are shown the same way as
+// problems caught in the page.
+async function postOrShowError(url, body) {
+  try {
+    return await postJson(url, body);
+  } catch (err) {
+    showEntryError(err.message);
+    return null;
+  }
+}
+
+async function saveNewTransaction(fields) {
+  const data = readFieldsOrShowError(fields);
+  if (!data) return;
+  const saved = await postOrShowError('/api/transactions', { accountId: selectedId, ...data });
+  if (!saved) return;
+
+  lastEnteredDate = data.date;
+  focusedRowId = saved.id;
+  await loadRegister();
+  // Ready for the next one.
+  byId('new-row')?.querySelector('input[name="date"]').focus();
+}
+
+// Changing a reconciled transaction makes the account disagree with a bank
+// statement you already matched, so it needs a deliberate yes.
+const RECONCILED_WARNING =
+  'This transaction was reconciled against a bank statement. ' +
+  'Changing it will make the account disagree with that statement.';
+
+function startEdit(t) {
+  if (t.status === 'reconciled' && !confirm(`${RECONCILED_WARNING}\n\nEdit it anyway?`)) return;
+  editingId = t.id;
+  renderRows();
+  document.querySelector('.editor-row input[name="date"]').focus();
+}
+
+// Closes the editor and puts the keyboard focus back on that line.
+function stopEditing(id) {
+  editingId = null;
+  focusedRowId = id;
+  renderRows();
+  document.querySelector(`.transaction-row[data-id="${id}"]`)?.focus();
+}
+
+async function saveEditedTransaction(t, fields) {
+  const data = readFieldsOrShowError(fields);
+  if (!data) return;
+  if (!(await postOrShowError('/api/transactions/update', { id: t.id, ...data }))) return;
+
+  editingId = null;
+  focusedRowId = t.id;
+  await loadRegister();
+  document.querySelector(`.transaction-row[data-id="${t.id}"]`)?.focus();
+}
+
+async function deleteTransaction(t) {
+  const amount = formatCents(Math.abs(t.amount_cents));
+  const description = [t.date, t.payee ?? t.memo ?? '', amount].join('   ');
+  const warning = t.status === 'reconciled' ? `${RECONCILED_WARNING}\n\n` : '';
+  if (!confirm(`${warning}Delete this transaction?\n\n${description}\n\nThis cannot be undone.`)) return;
+
+  // Afterwards, keep your place by moving to the line below (or above).
+  const rows = currentRegister.rows;
+  const index = rows.findIndex((r) => r.id === t.id);
+  const neighbor = rows[index + 1] ?? rows[index - 1];
+
+  await postJson('/api/transactions/delete', { id: t.id });
+  editingId = null;
+  focusedRowId = neighbor?.id ?? null;
+  await loadRegister();
+  document.querySelector(`.transaction-row[data-id="${focusedRowId}"]`)?.focus();
 }
 
 // --- Adding an account ---
