@@ -179,6 +179,23 @@ button.danger {
 .register-grid .col-num { width: 50px; }
 .register-grid .col-clr { width: 30px; text-align: center; }
 
+.register-balance {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The second selector is more specific than ".opening-row td", so a negative
+   opening balance still shows in red. */
+.negative,
+.register-grid td.negative {
+  color: var(--danger);
+}
+
+.opening-row td {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .empty-row td {
   color: var(--muted);
   text-align: center;

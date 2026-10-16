@@ -1,4 +1,5 @@
-// Rebuilds the SAMPLE database from scratch with made-up accounts, so there is
+// Rebuilds the SAMPLE database from scratch with made-up accounts and
+// transactions, so there is
 // always known, fake data to develop and try things against.
 //
 // Run with: npm run seed   (stop the server first; restart it afterwards)
@@ -30,8 +31,42 @@ const sampleAccounts = [
   { name: 'Sample Visa', type: 'credit_card', openingBalanceCents: -31245, openingDate: '2026-01-01' },
 ];
 
-for (const account of sampleAccounts) {
-  db.createAccount(account);
+const [checking, savings, visa] = sampleAccounts.map((account) => db.createAccount(account));
+
+// Made-up transactions. Amounts are signed cents: negative = money out.
+// Payees and categories come in later milestones, so for now the memo says
+// what each one is. A few share a date to show same-day ordering.
+const sampleTransactions = [
+  // Everyday Checking
+  { accountId: checking, date: '2026-01-02', amountCents: 215000, memo: 'Paycheck', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-03', amountCents: -140000, memo: 'Rent', checkNumber: '1001', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-05', amountCents: -8642, memo: 'Groceries', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-05', amountCents: -4110, memo: 'Gas', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-10', amountCents: -11237, memo: 'Electric bill', status: 'cleared' },
+  { accountId: checking, date: '2026-01-16', amountCents: 215000, memo: 'Paycheck', status: 'cleared' },
+  { accountId: checking, date: '2026-01-20', amountCents: -4890, memo: 'Water bill', status: 'cleared' },
+  { accountId: checking, date: '2026-01-22', amountCents: -13215, memo: 'Groceries' },
+  { accountId: checking, date: '2026-01-28', amountCents: -6000, memo: 'Babysitter', checkNumber: '1002' },
+  { accountId: checking, date: '2026-02-01', amountCents: -140000, memo: 'Rent', checkNumber: '1003' },
+
+  // Rainy Day Savings
+  { accountId: savings, date: '2026-01-31', amountCents: 412, memo: 'Interest', status: 'cleared' },
+  { accountId: savings, date: '2026-02-28', amountCents: 415, memo: 'Interest' },
+
+  // Sample Visa: charges are negative, payments and refunds positive.
+  { accountId: visa, date: '2026-01-04', amountCents: -6480, memo: 'Restaurant', status: 'cleared' },
+  { accountId: visa, date: '2026-01-09', amountCents: -12999, memo: 'Online order', status: 'cleared' },
+  { accountId: visa, date: '2026-01-12', amountCents: 2500, memo: 'Refund', status: 'cleared' },
+  { accountId: visa, date: '2026-01-20', amountCents: 31245, memo: 'Card payment', status: 'cleared' },
+  { accountId: visa, date: '2026-02-03', amountCents: -575, memo: 'Coffee' },
+  { accountId: visa, date: '2026-02-03', amountCents: -4720, memo: 'Hardware store' },
+];
+
+for (const transaction of sampleTransactions) {
+  db.createTransaction(transaction);
 }
 
-console.log(`Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts.`);
+console.log(
+  `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts ` +
+    `and ${sampleTransactions.length} transactions.`
+);

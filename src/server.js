@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { dbPath, isSampleData, HOST, PORT, publicDir } from './config.js';
 import * as db from './db.js';
+import { runningBalances } from './money.js';
 
 // --- Input checks ---
 //
@@ -58,14 +59,36 @@ function requireDate(value) {
 
 // --- API routes ---
 //
-// Each "METHOD /path" maps to a function. POST routes receive the parsed JSON
-// body; whatever the function returns is sent back to the browser as JSON.
-// Ids travel in the body (not the URL) so this table can stay a simple lookup.
+// Each "METHOD /path" maps to a function that receives the request's input:
+// for POST, the parsed JSON body; for GET, the "?name=value" query parameters
+// (which always arrive as text). Whatever it returns is sent back as JSON.
+// Ids travel in the input (not the URL path) so this table stays a simple lookup.
 
 const apiRoutes = {
   'GET /api/info': () => ({ isSampleData }),
 
   'GET /api/accounts': () => db.listAccounts(),
+
+  // One account's register: its transactions in order, each with the running
+  // balance after it. The balance is calculated here, fresh, on every request.
+  'GET /api/register': (query) => {
+    // Query values are text ("3"), so convert to a number before checking.
+    const accountId = requireId(Number(query.accountId));
+    const account = db.getAccount(accountId);
+    if (!account) throw httpError(404, 'No such account');
+
+    const rows = db.getRegister(accountId);
+    const balances = runningBalances(
+      account.opening_balance_cents,
+      rows.map((row) => row.amount_cents)
+    );
+
+    return {
+      openingBalanceCents: account.opening_balance_cents,
+      openingDate: account.opening_date,
+      rows: rows.map((row, i) => ({ ...row, balance_cents: balances[i] })),
+    };
+  },
 
   'POST /api/accounts': (body) => {
     if (!ACCOUNT_TYPES.includes(body.type)) throw httpError(400, 'Unknown account type');
@@ -191,14 +214,15 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // req.url includes any "?query" part; we only route on the path.
-  const { pathname } = new URL(req.url, `http://${HOST}`);
+  // req.url includes any "?query" part; we route on the path alone.
+  const { pathname, searchParams } = new URL(req.url, `http://${HOST}`);
   const handler = apiRoutes[`${req.method} ${pathname}`];
 
   if (handler) {
     try {
-      const body = req.method === 'POST' ? await readJsonBody(req) : undefined;
-      sendJson(res, 200, handler(body));
+      const input =
+        req.method === 'POST' ? await readJsonBody(req) : Object.fromEntries(searchParams);
+      sendJson(res, 200, handler(input));
     } catch (err) {
       // Expected problems (bad input, missing account) carry a status and just
       // send their message. Anything else is a bug: log it in the terminal.

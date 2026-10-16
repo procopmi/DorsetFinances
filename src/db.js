@@ -44,6 +44,17 @@ export function listAccounts() {
     .all();
 }
 
+// One account, or undefined if there's no account with that id.
+export function getAccount(id) {
+  return db
+    .prepare(
+      `SELECT id, name, type, opening_balance_cents, opening_date, is_closed, sort_order
+         FROM accounts
+        WHERE id = ?`
+    )
+    .get(id);
+}
+
 // Adds an account and returns its new id.
 export function createAccount({ name, type, openingBalanceCents, openingDate }) {
   const result = db
@@ -79,4 +90,45 @@ export function countTransactions(accountId) {
 // be orphaned even if a caller forgets to check countTransactions first.
 export function deleteAccount(id) {
   return db.prepare('DELETE FROM accounts WHERE id = ?').run(id).changes > 0;
+}
+
+// --- Transactions ---
+
+// Adds a transaction and returns its new id. amountCents is signed:
+// positive = money in, negative = money out.
+export function createTransaction({
+  accountId,
+  date,
+  amountCents,
+  memo = null,
+  checkNumber = null,
+  status = 'uncleared',
+}) {
+  const result = db
+    .prepare(
+      `INSERT INTO transactions (account_id, date, amount_cents, memo, check_number, status)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(accountId, date, amountCents, memo, checkNumber, status);
+  return Number(result.lastInsertRowid);
+}
+
+// One account's transactions in register order: by date, and within the same
+// date by id (the order they were entered). That ordering is what makes the
+// running balance come out the same every time.
+//
+// Payee and category names are looked up by joining their tables. LEFT JOIN
+// keeps a transaction even when it has no payee or category yet (name = null).
+export function getRegister(accountId) {
+  return db
+    .prepare(
+      `SELECT t.id, t.date, t.check_number, t.memo, t.amount_cents, t.status,
+              p.name AS payee, c.name AS category
+         FROM transactions t
+         LEFT JOIN payees p ON p.id = t.payee_id
+         LEFT JOIN categories c ON c.id = t.category_id
+        WHERE t.account_id = ?
+        ORDER BY t.date, t.id`
+    )
+    .all(accountId);
 }

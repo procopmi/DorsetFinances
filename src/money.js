@@ -54,3 +54,24 @@ export function formatCents(cents) {
 
   return `${sign}${dollars.toLocaleString('en-US')}.${String(remainder).padStart(2, '0')}`;
 }
+
+// The balance after each transaction, like the last column of a paper register.
+// Pass the opening balance and the signed amounts already in register order
+// (oldest first); you get back one balance per amount, in the same order.
+//   runningBalances(1000, [-250, 500]) -> [750, 1250]
+// Balances are always computed like this, never stored, so editing or deleting
+// a transaction can't leave a stale balance behind.
+export function runningBalances(openingCents, amountsCents) {
+  if (!Number.isSafeInteger(openingCents)) {
+    throw new Error(`runningBalances expects whole cents, got ${openingCents}`);
+  }
+
+  let balance = openingCents;
+  return amountsCents.map((amount) => {
+    if (!Number.isSafeInteger(amount)) {
+      throw new Error(`runningBalances expects whole cents, got ${amount}`);
+    }
+    balance += amount;
+    return balance;
+  });
+}

@@ -2,7 +2,7 @@
 // The browser never touches the database directly; it only talks to /api/ routes.
 
 // The same money.js the server uses (and the tests cover), served at /money.js.
-import { parseDollarsToCents } from '/money.js';
+import { parseDollarsToCents, formatCents } from '/money.js';
 
 // --- Page state ---
 // The accounts as last loaded from the server, and which one is selected.
@@ -67,6 +67,7 @@ function render() {
   byId('closed-accounts').hidden = closed.length === 0;
 
   renderRegisterHeader();
+  runAction(loadRegister);
 }
 
 function fillAccountList(list, items) {
@@ -104,6 +105,92 @@ function renderRegisterHeader() {
   const isCard = account?.type === 'credit_card';
   byId('outflow-heading').textContent = isCard ? 'Charge' : 'Payment';
   byId('inflow-heading').textContent = isCard ? 'Payment' : 'Deposit';
+}
+
+// --- The register grid ---
+
+// How each status shows in the "Clr" column, as in a paper register:
+// c = cleared (the bank has it), R = reconciled (matched to a statement).
+const STATUS_MARKS = { uncleared: '', cleared: 'c', reconciled: 'R' };
+
+// Builds one table cell. textContent keeps every value plain text.
+function cell(text, className) {
+  const td = document.createElement('td');
+  td.textContent = text ?? '';
+  if (className) td.className = className;
+  return td;
+}
+
+// A balance cell, shown in red when below zero (overdrawn, or owed on a card).
+function balanceCell(cents) {
+  return cell(formatCents(cents), cents < 0 ? 'col-money negative' : 'col-money');
+}
+
+function showRegisterMessage(message) {
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const td = cell(message);
+  td.colSpan = 9;
+  row.append(td);
+  byId('register-rows').replaceChildren(row);
+  byId('register-balance').textContent = '';
+}
+
+async function loadRegister() {
+  const accountId = selectedId;
+  if (accountId === null) {
+    showRegisterMessage('No account selected.');
+    return;
+  }
+
+  const register = await getJson(`/api/register?accountId=${accountId}`);
+
+  // If you clicked another account while this was loading, a newer load is
+  // already on its way; drop this one so the grid never shows the wrong account.
+  if (accountId !== selectedId) return;
+
+  // The first row is the opening balance, like the top line of a checkbook.
+  const openingRow = document.createElement('tr');
+  openingRow.className = 'opening-row';
+  openingRow.append(
+    cell(register.openingDate),
+    cell(''),
+    cell('Opening balance'),
+    cell(''),
+    cell(''),
+    cell('', 'col-money'),
+    cell('', 'col-clr'),
+    cell('', 'col-money'),
+    balanceCell(register.openingBalanceCents)
+  );
+
+  const rows = register.rows.map((t) => {
+    // One signed amount is split across two columns: money out (negative)
+    // shows as a positive number under Payment/Charge, money in under Deposit.
+    const isOutflow = t.amount_cents < 0;
+    const row = document.createElement('tr');
+    row.append(
+      cell(t.date),
+      cell(t.check_number),
+      cell(t.payee),
+      cell(t.category),
+      cell(t.memo),
+      cell(isOutflow ? formatCents(-t.amount_cents) : '', 'col-money'),
+      cell(STATUS_MARKS[t.status], 'col-clr'),
+      cell(isOutflow ? '' : formatCents(t.amount_cents), 'col-money'),
+      balanceCell(t.balance_cents)
+    );
+    return row;
+  });
+
+  byId('register-rows').replaceChildren(openingRow, ...rows);
+
+  // The current balance is the last row's balance (or the opening balance if
+  // there are no transactions yet).
+  const current = register.rows.at(-1)?.balance_cents ?? register.openingBalanceCents;
+  const balanceText = byId('register-balance');
+  balanceText.textContent = `Balance: ${formatCents(current)}`;
+  balanceText.classList.toggle('negative', current < 0);
 }
 
 // --- Adding an account ---
