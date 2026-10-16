@@ -115,16 +115,42 @@ function requireCategoryNameFree(name, parentId, exceptId) {
   }
 }
 
-// The register fields shared by "add" and "edit".
-function readTransactionFields(body) {
+// The other account of a transfer, or null for an ordinary transaction.
+// It must be a different account, and open, unless it's the account the
+// transfer already goes to (so a transfer to an account closed later can
+// still be edited).
+function optionalTransferAccountId(value, ownAccountId, currentOtherAccountId = null) {
+  if (value === undefined || value === null) return null;
+  const account = db.getAccount(requireId(value));
+  if (!account) throw httpError(400, 'No such account to transfer to');
+  if (account.id === ownAccountId) throw httpError(400, 'A transfer needs two different accounts');
+  if (account.is_closed && account.id !== currentOtherAccountId) {
+    throw httpError(400, `"${account.name}" is closed; reopen it to transfer to it`);
+  }
+  return account.id;
+}
+
+// The register fields shared by "add" and "edit". The category box holds
+// either a category or "Transfer: <account>", never both.
+function readTransactionFields(body, ownAccountId, currentOtherAccountId) {
+  if (body.categoryId != null && body.transferAccountId != null) {
+    throw httpError(400, 'A transfer has no category; choose one or the other');
+  }
   return {
     date: requireDate(body.date),
     checkNumber: optionalText(body.checkNumber, 'Check number', 20),
     payeeName: optionalText(body.payee, 'Payee', 100),
     categoryId: optionalCategoryId(body.categoryId),
+    transferAccountId: optionalTransferAccountId(body.transferAccountId, ownAccountId, currentOtherAccountId),
     memo: optionalText(body.memo, 'Memo', 200),
     amountCents: requireCents(body.amountCents),
   };
+}
+
+function requireTransaction(id) {
+  const transaction = db.getTransaction(requireId(id));
+  if (!transaction) throw httpError(404, 'No such transaction');
+  return transaction;
 }
 
 // --- API routes ---
@@ -280,20 +306,61 @@ const apiRoutes = {
   'POST /api/transactions': (body) => {
     const accountId = requireId(body.accountId);
     if (!db.getAccount(accountId)) throw httpError(404, 'No such account');
-    const id = db.createTransaction({ accountId, ...readTransactionFields(body) });
+    const id = db.createTransaction({ accountId, ...readTransactionFields(body, accountId) });
     return { id };
   },
 
   'POST /api/transactions/update': (body) => {
-    if (!db.updateTransaction(requireId(body.id), readTransactionFields(body))) {
-      throw httpError(404, 'No such transaction');
+    const existing = requireTransaction(body.id);
+    const otherHalf = existing.transfer_id === null ? null : db.getTransaction(existing.transfer_id);
+    const fields = readTransactionFields(body, existing.account_id, otherHalf?.account_id);
+    // Making a transfer an ordinary transaction would strand its other half,
+    // so that goes through Unlink, which keeps both rows on purpose.
+    if (otherHalf && !fields.transferAccountId) {
+      throw httpError(400, 'This is a transfer. Use Unlink first to make it an ordinary transaction.');
     }
+    db.updateTransaction(existing.id, fields);
     return { ok: true };
   },
 
-  // The page asks for confirmation before calling this.
+  // The page asks for confirmation before calling this. A transfer's other
+  // half is deleted too.
   'POST /api/transactions/delete': (body) => {
     if (!db.deleteTransaction(requireId(body.id))) throw httpError(404, 'No such transaction');
+    return { ok: true };
+  },
+
+  // --- Transfers ---
+
+  // Rows in other accounts that could be this row's other half (opposite
+  // amount, within a week), for "Link as transfer".
+  'GET /api/transfers/candidates': (query) => {
+    const transaction = requireTransaction(Number(query.id));
+    return db.findTransferCandidates(transaction.id);
+  },
+
+  // Joins two existing rows (e.g. both sides imported from two banks) into
+  // one transfer. The page asks first, since their categories are cleared.
+  'POST /api/transfers/link': (body) => {
+    const a = requireTransaction(body.id);
+    const b = requireTransaction(body.otherId);
+    if (a.account_id === b.account_id) throw httpError(400, 'A transfer needs two different accounts');
+    if (a.transfer_id !== null || b.transfer_id !== null) {
+      throw httpError(400, 'One of these is already part of a transfer');
+    }
+    // Money leaving one account must arrive in the other, to the cent.
+    if (a.amount_cents !== -b.amount_cents) {
+      throw httpError(400, 'The two amounts must be opposite (e.g. -500.00 and +500.00)');
+    }
+    db.linkTransfer(a.id, b.id);
+    return { ok: true };
+  },
+
+  // Turns a transfer back into two ordinary rows; nothing is deleted.
+  'POST /api/transfers/unlink': (body) => {
+    if (!db.unlinkTransfer(requireTransaction(body.id).id)) {
+      throw httpError(400, 'This transaction is not a transfer');
+    }
     return { ok: true };
   },
 

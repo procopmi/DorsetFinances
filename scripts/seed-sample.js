@@ -49,6 +49,11 @@ const sampleTransactions = [
   { accountId: checking, date: '2026-01-05', amountCents: -4110, payeeName: 'Quick Fuel', category: 'Auto: Fuel', status: 'reconciled' },
   { accountId: checking, date: '2026-01-10', amountCents: -11237, payeeName: 'City Electric', category: 'Utilities: Electric', status: 'cleared' },
   { accountId: checking, date: '2026-01-16', amountCents: 215000, payeeName: 'Acme Corp Payroll', category: 'Michael Income: Pay', status: 'cleared' },
+  // A transfer entered by hand: creates the matching +500.00 row in savings.
+  { accountId: checking, date: '2026-01-17', amountCents: -50000, payeeName: 'Move to savings', transferAccountId: savings, status: 'cleared' },
+  // The checking side of the Visa payment, as checking's bank download would show it
+  // (linked to the Visa's own row below, as if both were imported).
+  { accountId: checking, date: '2026-01-19', amountCents: -31245, payeeName: 'Sample Visa', memo: 'Card payment', status: 'cleared' },
   { accountId: checking, date: '2026-01-20', amountCents: -4890, payeeName: 'City Water', category: 'Utilities: Water', status: 'cleared' },
   { accountId: checking, date: '2026-01-22', amountCents: -13215, payeeName: 'Corner Market', category: 'Food: Groceries' },
   { accountId: checking, date: '2026-01-25', amountCents: 5000, payeeName: 'Friend via Zelle', category: 'Other Income: Repayments', memo: 'Their half of dinner' },
@@ -64,7 +69,7 @@ const sampleTransactions = [
   { accountId: visa, date: '2026-01-04', amountCents: -6480, payeeName: 'Luigi’s Trattoria', category: 'Food: Dining Out', status: 'cleared' },
   { accountId: visa, date: '2026-01-09', amountCents: -12999, payeeName: 'Online Megastore', category: 'Other: Household Supplies', status: 'cleared' },
   { accountId: visa, date: '2026-01-12', amountCents: 2500, payeeName: 'Online Megastore', category: 'Other: Household Supplies', memo: 'Refund', status: 'cleared' },
-  // A card payment is a transfer between accounts (milestone 7), so it gets no category.
+  // The card side of the payment, a day later than checking's: linked below.
   { accountId: visa, date: '2026-01-20', amountCents: 31245, payeeName: 'Payment - thank you', status: 'cleared' },
   { accountId: visa, date: '2026-02-03', amountCents: -1499, payeeName: 'AppleOne', category: 'Subscriptions: Streaming & Media' },
   { accountId: visa, date: '2026-02-03', amountCents: -4720, payeeName: 'Hometown Hardware', category: 'Housing: Repairs & Maintenance' },
@@ -77,6 +82,11 @@ for (const { category, ...transaction } of sampleTransactions) {
   if (categoryId === undefined) throw new Error(`Unknown category label in seed data: "${category}"`);
   db.createTransaction({ ...transaction, categoryId });
 }
+
+// Link the two halves of the Visa payment, as "Link as transfer" would.
+const checkingSide = db.getRegister(checking).find((t) => t.payee === 'Sample Visa');
+const visaSide = db.getRegister(visa).find((t) => t.payee === 'Payment - thank you');
+db.linkTransfer(checkingSide.id, visaSide.id);
 
 console.log(
   `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts, ` +

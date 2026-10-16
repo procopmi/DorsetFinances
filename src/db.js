@@ -296,43 +296,106 @@ function findOrCreatePayee(name) {
 
 // --- Transactions ---
 
+// Transfers: money moving between two of your own accounts (paying the card
+// from checking, moving money to savings). A transfer is two ordinary rows,
+// one in each account, with opposite amounts, each row's transfer_id holding
+// the other row's id. Transfers have no category: they aren't income or
+// spending, so reports leave them out.
+
+// One transaction, or undefined if there's no transaction with that id.
+export function getTransaction(id) {
+  return db
+    .prepare('SELECT id, account_id, date, amount_cents, status, transfer_id FROM transactions WHERE id = ?')
+    .get(id);
+}
+
+function insertTransaction({ accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status }) {
+  const result = db
+    .prepare(
+      `INSERT INTO transactions
+         (account_id, date, amount_cents, payee_id, category_id, memo, check_number, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status);
+  return Number(result.lastInsertRowid);
+}
+
+// Points two rows at each other as the halves of one transfer, and clears
+// their categories (a transfer isn't income or spending).
+function pairAsTransfer(idA, idB) {
+  const link = db.prepare('UPDATE transactions SET transfer_id = ?, category_id = NULL WHERE id = ?');
+  link.run(idB, idA);
+  link.run(idA, idB);
+}
+
+// Creates the other half of a transfer in `otherAccountId`: same date, payee
+// and memo, opposite amount, not yet cleared (the other bank hasn't
+// necessarily processed it). Returns its id.
+function createTransferPartner(id, otherAccountId) {
+  const row = db
+    .prepare('SELECT date, amount_cents, payee_id, memo FROM transactions WHERE id = ?')
+    .get(id);
+  const partnerId = insertTransaction({
+    accountId: otherAccountId,
+    date: row.date,
+    amountCents: -row.amount_cents,
+    payeeId: row.payee_id,
+    categoryId: null,
+    memo: row.memo,
+    checkNumber: null,
+    status: 'uncleared',
+  });
+  pairAsTransfer(id, partnerId);
+  return partnerId;
+}
+
 // Adds a transaction and returns its new id. amountCents is signed:
 // positive = money in, negative = money out. payeeName is plain text; the
 // matching payee is looked up or created here. categoryId may be null
-// (uncategorized).
+// (uncategorized). With transferAccountId (instead of a category), the other
+// half of a transfer is created in that account too, all or nothing.
 export function createTransaction({
   accountId,
   date,
   amountCents,
   payeeName = null,
   categoryId = null,
+  transferAccountId = null,
   memo = null,
   checkNumber = null,
   status = 'uncleared',
 }) {
   return allOrNothing(() => {
     const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
-    const result = db
-      .prepare(
-        `INSERT INTO transactions
-           (account_id, date, amount_cents, payee_id, category_id, memo, check_number, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status);
-    rememberPayeeCategory(payeeId, categoryId);
-    return Number(result.lastInsertRowid);
+    const id = insertTransaction({ accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status });
+    if (transferAccountId) {
+      createTransferPartner(id, transferAccountId);
+    } else {
+      rememberPayeeCategory(payeeId, categoryId);
+    }
+    return id;
   });
 }
 
 // Changes the fields you can edit in the register. Status is left as it is
 // (it has its own controls). Returns false if there's no transaction with that id.
+//
+// For a transfer (transferAccountId set), the other half is kept in step:
+//   - its amount always mirrors this one (-500 here means +500 there);
+//   - it moves to transferAccountId if you pointed the transfer elsewhere;
+//   - its date follows this one only if the two dates matched before, so a
+//     bank-imported other half keeps the date that bank gave it.
+// A plain transaction given a transferAccountId becomes a transfer, and its
+// other half is created. (Turning a transfer back into a plain transaction is
+// done with unlinkTransfer, so the other half is never silently lost.)
 export function updateTransaction(
   id,
-  { date, amountCents, payeeName = null, categoryId = null, memo = null, checkNumber = null }
+  { date, amountCents, payeeName = null, categoryId = null, transferAccountId = null, memo = null, checkNumber = null }
 ) {
   return allOrNothing(() => {
     // Check first, so a missing transaction doesn't leave a new payee behind.
-    if (!db.prepare('SELECT 1 FROM transactions WHERE id = ?').get(id)) return false;
+    const before = getTransaction(id);
+    if (!before) return false;
 
     const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
     db.prepare(
@@ -340,10 +403,56 @@ export function updateTransaction(
           SET date = ?, amount_cents = ?, payee_id = ?, category_id = ?, memo = ?, check_number = ?,
               updated_at = datetime('now')
         WHERE id = ?`
-    ).run(date, amountCents, payeeId, categoryId, memo, checkNumber, id);
-    rememberPayeeCategory(payeeId, categoryId);
+    ).run(date, amountCents, payeeId, transferAccountId ? null : categoryId, memo, checkNumber, id);
+
+    if (!transferAccountId) {
+      rememberPayeeCategory(payeeId, categoryId);
+    } else if (before.transfer_id === null) {
+      createTransferPartner(id, transferAccountId);
+    } else {
+      const partner = getTransaction(before.transfer_id);
+      db.prepare(
+        `UPDATE transactions
+            SET amount_cents = ?, account_id = ?, date = ?, updated_at = datetime('now')
+          WHERE id = ?`
+      ).run(-amountCents, transferAccountId, partner.date === before.date ? date : partner.date, partner.id);
+    }
     return true;
   });
+}
+
+// Joins two existing rows into one transfer, e.g. a checking withdrawal and
+// the card payment that both arrived by CSV import. The server checks they're
+// in different accounts, have opposite amounts, and aren't transfers already.
+export function linkTransfer(idA, idB) {
+  allOrNothing(() => pairAsTransfer(idA, idB));
+}
+
+// Splits a transfer back into two ordinary (uncategorized) rows. Nothing is
+// deleted. Returns false if the row isn't part of a transfer.
+export function unlinkTransfer(id) {
+  const row = getTransaction(id);
+  if (!row || row.transfer_id === null) return false;
+  db.prepare('UPDATE transactions SET transfer_id = NULL WHERE id IN (?, ?)').run(id, row.transfer_id);
+  return true;
+}
+
+// Rows in other accounts that could be the other half of this one: the
+// opposite amount, not already part of a transfer, dated within `days` days.
+// Closest dates first.
+export function findTransferCandidates(id, days = 7) {
+  const row = getTransaction(id);
+  return db
+    .prepare(
+      `SELECT t.id, t.date, t.amount_cents, t.memo, t.status, a.name AS account, p.name AS payee
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+        WHERE t.account_id != ? AND t.amount_cents = ? AND t.transfer_id IS NULL
+          AND ABS(julianday(t.date) - julianday(?)) <= ?
+        ORDER BY ABS(julianday(t.date) - julianday(?)), t.id`
+    )
+    .all(row.account_id, -row.amount_cents, row.date, days, row.date);
 }
 
 // status is 'uncleared', 'cleared' or 'reconciled' (the server checks).
@@ -366,8 +475,15 @@ export function reconcileCleared(accountId) {
     .run(accountId).changes;
 }
 
+// Removes a transaction. For a transfer both halves go, since one half on its
+// own would leave money appearing or vanishing. The page says so and asks first.
 export function deleteTransaction(id) {
-  return db.prepare('DELETE FROM transactions WHERE id = ?').run(id).changes > 0;
+  return allOrNothing(() => {
+    const row = getTransaction(id);
+    if (!row) return false;
+    db.prepare('DELETE FROM transactions WHERE id IN (?, ?)').run(id, row.transfer_id);
+    return true;
+  });
 }
 
 // One account's transactions in register order: by date, and within the same
@@ -377,16 +493,21 @@ export function deleteTransaction(id) {
 // Payee and category names are looked up by joining their tables. LEFT JOIN
 // keeps a transaction even when it has no payee or category yet (name = null).
 // The category is shown as "Group: Sub", so the categories table is joined a
-// second time (as "g") to get the sub's group name.
+// second time (as "g") to get the sub's group name. For a transfer, the other
+// half (pt) and its account (pa) are joined to show "Transfer: <account>".
 export function getRegister(accountId) {
   return db
     .prepare(
       `SELECT t.id, t.date, t.check_number, t.memo, t.amount_cents, t.status,
-              p.name AS payee, t.category_id, g.name || ': ' || c.name AS category
+              p.name AS payee, t.category_id, g.name || ': ' || c.name AS category,
+              t.transfer_id, pt.account_id AS transfer_account_id,
+              pa.name AS transfer_account, pt.status AS transfer_status
          FROM transactions t
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
          LEFT JOIN categories g ON g.id = c.parent_id
+         LEFT JOIN transactions pt ON pt.id = t.transfer_id
+         LEFT JOIN accounts pa ON pa.id = pt.account_id
         WHERE t.account_id = ?
         ORDER BY t.date, t.id`
     )

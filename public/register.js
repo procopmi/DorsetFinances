@@ -5,7 +5,7 @@
 
 // The same money.js the server uses (and the tests cover), served at /money.js.
 import { parseDollarsToCents, formatCents } from '/money.js';
-import { byId, getJson, postJson, runAction } from '/api.js';
+import { byId, getJson, postJson, runAction, makeButton } from '/api.js';
 
 // --- Page state ---
 // The accounts as last loaded from the server, and which one is selected.
@@ -151,12 +151,44 @@ async function loadRegister() {
   payees = payeeList;
   categoryChoices = buildCategoryChoices(categoryList);
   fillOptions('payee-options', payees.map((p) => p.name));
-  fillOptions(
-    'category-options',
-    categoryChoices.filter((c) => !c.isHidden).map((c) => c.label)
-  );
+  // The Category box also offers "Transfer: <account>" for each other open
+  // account, after the real categories.
+  fillOptions('category-options', [
+    ...categoryChoices.filter((c) => !c.isHidden).map((c) => c.label),
+    ...transferTargets().map(transferLabel),
+  ]);
   renderRows();
+
+  // After jumping to the other half of a transfer, put the cursor on it.
+  if (pendingFocusId !== null) {
+    document.querySelector(`.transaction-row[data-id="${pendingFocusId}"]`)?.focus();
+    pendingFocusId = null;
+  }
 }
+
+// --- Transfers in the Category box ---
+
+// A row to focus once the register has loaded (see goToOtherHalf).
+let pendingFocusId = null;
+
+const transferLabel = (account) => `Transfer: ${account.name}`;
+
+// The accounts you can transfer to from the selected one: every other open account.
+function transferTargets() {
+  return accounts.filter((a) => a.id !== selectedId && !a.is_closed);
+}
+
+// The other account for "Transfer: <name>" typed in the Category box, or
+// undefined if the text isn't a transfer. Closed accounts are included so an
+// old transfer to an account closed since can still be saved; the server
+// refuses closed accounts for new transfers.
+function findTransferAccountId(text) {
+  const wanted = text.trim().toLowerCase();
+  return accounts.find((a) => a.id !== selectedId && transferLabel(a).toLowerCase() === wanted)?.id;
+}
+
+// What the Category column shows for a row.
+const categoryText = (t) => (t.transfer_id ? `Transfer: ${t.transfer_account}` : t.category);
 
 // Turns the flat category list from the server into "Group: Sub" choices, in
 // display order: each group's subs, group by group. A sub counts as hidden
@@ -275,7 +307,7 @@ function buildViewRow(t, canEdit) {
     cell(t.date),
     cell(t.check_number),
     cell(t.payee),
-    cell(t.category),
+    cell(categoryText(t)),
     cell(t.memo),
     cell(outflow, 'col-money'),
     clrCell,
@@ -478,14 +510,16 @@ function buildNewRow() {
   return row;
 }
 
-// An existing transaction opened for editing, with a Delete button.
+// An existing transaction opened for editing, with its action buttons:
+// Delete always; for a transfer, "Other side" and "Unlink"; otherwise
+// "Link…" to join it with its other half in another account.
 function buildEditRow(t) {
   const { row, fields, actionsCell } = buildEditorRow(
     {
       date: t.date,
       checkNumber: t.check_number,
       payee: t.payee,
-      category: t.category,
+      category: categoryText(t),
       memo: t.memo,
       ...splitAmount(t.amount_cents),
     },
@@ -496,12 +530,17 @@ function buildEditRow(t) {
     }
   );
 
-  const deleteButton = document.createElement('button');
-  deleteButton.type = 'button';
-  deleteButton.className = 'danger small';
-  deleteButton.textContent = 'Delete';
-  deleteButton.addEventListener('click', () => runAction(() => deleteTransaction(t)));
-  actionsCell.append(deleteButton);
+  const buttons = [makeButton('Delete', () => deleteTransaction(t), 'danger small')];
+  if (t.transfer_id) {
+    buttons.push(
+      makeButton('Other side', async () => goToOtherHalf(t), 'small'),
+      makeButton('Unlink', () => unlinkTransfer(t), 'small')
+    );
+  } else {
+    buttons.push(makeButton('Link…', () => linkAsTransfer(t), 'small'));
+  }
+  actionsCell.classList.add('row-actions');
+  actionsCell.append(...buttons);
   return row;
 }
 
@@ -531,9 +570,11 @@ function readFields(fields) {
     throw problem(`Leave out the minus sign; use the ${outText ? inName : outName} column instead.`, amountField);
   }
 
+  // The Category box holds either "Transfer: <account>" or a category.
   // Categories are a fixed list (managed on their own screen), so unlike
   // payees, an unknown name is a mistake rather than something to create.
-  const categoryId = findCategoryId(fields.category.value);
+  const transferAccountId = findTransferAccountId(fields.category.value) ?? null;
+  const categoryId = transferAccountId ? null : findCategoryId(fields.category.value);
   if (categoryId === undefined) {
     throw problem(
       `"${fields.category.value.trim()}" doesn't match one category. Pick one from the suggestions.`,
@@ -546,6 +587,7 @@ function readFields(fields) {
     checkNumber: fields.checkNumber.value,
     payee: fields.payee.value,
     categoryId,
+    transferAccountId,
     memo: fields.memo.value,
     amountCents: outText ? -cents : cents,
   };
@@ -596,14 +638,17 @@ async function saveNewTransaction(fields) {
   byId('new-row')?.querySelector('input[name="date"]').focus();
 }
 
-// Changing a reconciled transaction makes the account disagree with a bank
-// statement you already matched, so it needs a deliberate yes.
+// Changing a reconciled transaction makes the account disagree with the bank
+// balance you already checked it against, so it needs a deliberate yes. For
+// a transfer, edits reach the other half too, so its status counts as well.
 const RECONCILED_WARNING =
-  'This transaction was reconciled against a bank statement. ' +
-  'Changing it will make the account disagree with that statement.';
+  'This transaction (or the other side of this transfer) is reconciled: it was checked against your bank. ' +
+  'Changing it will make the account disagree with the bank.';
+
+const isLocked = (t) => t.status === 'reconciled' || t.transfer_status === 'reconciled';
 
 function startEdit(t) {
-  if (t.status === 'reconciled' && !confirm(`${RECONCILED_WARNING}\n\nEdit it anyway?`)) return;
+  if (isLocked(t) && !confirm(`${RECONCILED_WARNING}\n\nEdit it anyway?`)) return;
   editingId = t.id;
   renderRows();
   document.querySelector('.editor-row input[name="date"]').focus();
@@ -631,8 +676,12 @@ async function saveEditedTransaction(t, fields) {
 async function deleteTransaction(t) {
   const amount = formatCents(Math.abs(t.amount_cents));
   const description = [t.date, t.payee ?? t.memo ?? '', amount].join('   ');
-  const warning = t.status === 'reconciled' ? `${RECONCILED_WARNING}\n\n` : '';
-  if (!confirm(`${warning}Delete this transaction?\n\n${description}\n\nThis cannot be undone.`)) return;
+  const warning = isLocked(t) ? `${RECONCILED_WARNING}\n\n` : '';
+  const bothSides = t.transfer_id
+    ? `\n\nThis is a transfer with "${t.transfer_account}". Both sides will be deleted.`
+    : '';
+  const message = `${warning}Delete this transaction?\n\n${description}${bothSides}\n\nThis cannot be undone.`;
+  if (!confirm(message)) return;
 
   // Afterwards, keep your place by moving to the line below (or above).
   const rows = currentRegister.rows;
@@ -644,6 +693,64 @@ async function deleteTransaction(t) {
   focusedRowId = neighbor?.id ?? null;
   await loadRegister();
   document.querySelector(`.transaction-row[data-id="${focusedRowId}"]`)?.focus();
+}
+
+// --- Transfer actions ---
+
+// Switches to the other account and puts the cursor on the matching row.
+function goToOtherHalf(t) {
+  selectedId = t.transfer_account_id;
+  editingId = null;
+  focusedRowId = t.transfer_id;
+  pendingFocusId = t.transfer_id;
+  render(); // redraws the sidebar and loads that account's register
+}
+
+// Turns the transfer back into two ordinary rows. Nothing is deleted, so it
+// doesn't need a warning beyond saying what happens.
+async function unlinkTransfer(t) {
+  const message =
+    `Unlink this transfer with "${t.transfer_account}"?\n\n` +
+    'Both rows stay, as ordinary uncategorized transactions.';
+  if (!confirm(message)) return;
+  await postJson('/api/transfers/unlink', { id: t.id });
+  editingId = null;
+  focusedRowId = t.id;
+  await loadRegister();
+}
+
+// Joins this row with its other half in another account, e.g. when both
+// banks' CSV downloads included the same payment. Lists rows with the
+// opposite amount within a week, and you type the number of the right one.
+async function linkAsTransfer(t) {
+  const candidates = await getJson(`/api/transfers/candidates?id=${t.id}`);
+  if (candidates.length === 0) {
+    alert(
+      'No matching row in your other accounts: it needs the opposite amount ' +
+        `(${formatCents(-t.amount_cents)}), dated within a week, and not already a transfer.`
+    );
+    return;
+  }
+
+  const lines = candidates.map(
+    (c, i) => `${i + 1})  ${c.account}   ${c.date}   ${c.payee ?? c.memo ?? ''}   ${formatCents(c.amount_cents)}`
+  );
+  const answer = prompt(
+    `Link as a transfer with which row? Type its number.\n\n${lines.join('\n')}\n\n` +
+      'Both rows will lose their categories (a transfer is not income or spending).',
+    candidates.length === 1 ? '1' : ''
+  );
+  if (answer === null) return; // cancelled
+  const chosen = candidates[Number(answer) - 1];
+  if (!chosen) {
+    alert(`"${answer}" isn't one of the numbers listed.`);
+    return;
+  }
+
+  await postJson('/api/transfers/link', { id: t.id, otherId: chosen.id });
+  editingId = null;
+  focusedRowId = t.id;
+  await loadRegister();
 }
 
 // --- Adding an account ---

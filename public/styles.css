@@ -355,6 +355,17 @@ button.small {
   padding: 1px 6px;
 }
 
+/* Delete / Other side / Unlink / Link… on a row being edited. They wrap
+   onto two lines rather than widening the Balance column. */
+.register-grid td.row-actions {
+  white-space: normal;
+  text-align: left;
+}
+
+.row-actions button {
+  margin: 1px;
+}
+
 .keyboard-hint {
   font-size: 12px;
   margin-top: 6px;

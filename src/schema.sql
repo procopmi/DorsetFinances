@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   amount_cents     INTEGER NOT NULL,
   status           TEXT    NOT NULL DEFAULT 'uncleared'
                            CHECK (status IN ('uncleared', 'cleared', 'reconciled')),
-  transfer_id      INTEGER,  -- both halves of a transfer share this value
+  transfer_id      INTEGER,  -- for a transfer: the id of the other half (each points at the other)
   bank_description TEXT,     -- original bank text, for imported rows
   import_hash      TEXT,     -- lets a re-import skip rows already imported
   created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
