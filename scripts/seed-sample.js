@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import { dbPath, isSampleData } from '../src/config.js';
 import * as db from '../src/db.js';
+import { addDefaultCategories } from '../src/default-categories.js';
 
 if (!isSampleData || path.basename(dbPath) !== 'sample.db') {
   console.error(`Refusing to seed: ${dbPath} is not the sample database.`);
@@ -33,40 +34,51 @@ const sampleAccounts = [
 
 const [checking, savings, visa] = sampleAccounts.map((account) => db.createAccount(account));
 
+// The approved category list (src/default-categories.js).
+const categoryIds = addDefaultCategories();
+
 // Made-up transactions with made-up payees (each payee is created the first
 // time it's used). Amounts are signed cents: negative = money out.
-// A few share a date to show same-day ordering.
+// `category` is a "Group: Sub" label from the default list; leaving it out
+// means uncategorized. A few share a date to show same-day ordering.
 const sampleTransactions = [
   // Everyday Checking
-  { accountId: checking, date: '2026-01-02', amountCents: 215000, payeeName: 'Acme Corp Payroll', status: 'reconciled' },
-  { accountId: checking, date: '2026-01-03', amountCents: -140000, payeeName: 'Oak Street Apartments', memo: 'January rent', checkNumber: '1001', status: 'reconciled' },
-  { accountId: checking, date: '2026-01-05', amountCents: -8642, payeeName: 'Corner Market', status: 'reconciled' },
-  { accountId: checking, date: '2026-01-05', amountCents: -4110, payeeName: 'Quick Fuel', status: 'reconciled' },
-  { accountId: checking, date: '2026-01-10', amountCents: -11237, payeeName: 'City Electric', status: 'cleared' },
-  { accountId: checking, date: '2026-01-16', amountCents: 215000, payeeName: 'Acme Corp Payroll', status: 'cleared' },
-  { accountId: checking, date: '2026-01-20', amountCents: -4890, payeeName: 'City Water', status: 'cleared' },
-  { accountId: checking, date: '2026-01-22', amountCents: -13215, payeeName: 'Corner Market' },
-  { accountId: checking, date: '2026-01-28', amountCents: -6000, payeeName: 'Sam the Sitter', checkNumber: '1002' },
-  { accountId: checking, date: '2026-02-01', amountCents: -140000, payeeName: 'Oak Street Apartments', memo: 'February rent', checkNumber: '1003' },
+  { accountId: checking, date: '2026-01-02', amountCents: 215000, payeeName: 'Acme Corp Payroll', category: 'Michael Income: Pay', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-03', amountCents: -140000, payeeName: 'Sample Mortgage Co', category: 'Housing: Mortgage', memo: 'January payment', checkNumber: '1001', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-05', amountCents: -8642, payeeName: 'Corner Market', category: 'Food: Groceries', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-05', amountCents: -4110, payeeName: 'Quick Fuel', category: 'Auto: Fuel', status: 'reconciled' },
+  { accountId: checking, date: '2026-01-10', amountCents: -11237, payeeName: 'City Electric', category: 'Utilities: Electric', status: 'cleared' },
+  { accountId: checking, date: '2026-01-16', amountCents: 215000, payeeName: 'Acme Corp Payroll', category: 'Michael Income: Pay', status: 'cleared' },
+  { accountId: checking, date: '2026-01-20', amountCents: -4890, payeeName: 'City Water', category: 'Utilities: Water', status: 'cleared' },
+  { accountId: checking, date: '2026-01-22', amountCents: -13215, payeeName: 'Corner Market', category: 'Food: Groceries' },
+  { accountId: checking, date: '2026-01-25', amountCents: 5000, payeeName: 'Friend via Zelle', category: 'Other Income: Repayments', memo: 'Their half of dinner' },
+  { accountId: checking, date: '2026-01-28', amountCents: -6000, payeeName: 'Paws Pet Sitting', category: 'Pets: Pet Sitting', checkNumber: '1002' },
+  { accountId: checking, date: '2026-02-01', amountCents: -140000, payeeName: 'Sample Mortgage Co', category: 'Housing: Mortgage', memo: 'February payment', checkNumber: '1003' },
 
   // Rainy Day Savings
-  { accountId: savings, date: '2026-01-31', amountCents: 412, payeeName: 'Interest', status: 'cleared' },
-  { accountId: savings, date: '2026-02-28', amountCents: 415, payeeName: 'Interest' },
+  { accountId: savings, date: '2026-01-31', amountCents: 412, payeeName: 'Interest', category: 'Other Income: Interest', status: 'cleared' },
+  { accountId: savings, date: '2026-02-28', amountCents: 415, payeeName: 'Interest', category: 'Other Income: Interest' },
 
   // Sample Visa: charges are negative, payments and refunds positive.
-  { accountId: visa, date: '2026-01-04', amountCents: -6480, payeeName: 'Luigi’s Trattoria', status: 'cleared' },
-  { accountId: visa, date: '2026-01-09', amountCents: -12999, payeeName: 'Online Megastore', status: 'cleared' },
-  { accountId: visa, date: '2026-01-12', amountCents: 2500, payeeName: 'Online Megastore', memo: 'Refund', status: 'cleared' },
+  // A refund goes back to the original purchase's category.
+  { accountId: visa, date: '2026-01-04', amountCents: -6480, payeeName: 'Luigi’s Trattoria', category: 'Food: Dining Out', status: 'cleared' },
+  { accountId: visa, date: '2026-01-09', amountCents: -12999, payeeName: 'Online Megastore', category: 'Other: Household Supplies', status: 'cleared' },
+  { accountId: visa, date: '2026-01-12', amountCents: 2500, payeeName: 'Online Megastore', category: 'Other: Household Supplies', memo: 'Refund', status: 'cleared' },
+  // A card payment is a transfer between accounts (milestone 7), so it gets no category.
   { accountId: visa, date: '2026-01-20', amountCents: 31245, payeeName: 'Payment - thank you', status: 'cleared' },
-  { accountId: visa, date: '2026-02-03', amountCents: -575, payeeName: 'Bean There Coffee' },
-  { accountId: visa, date: '2026-02-03', amountCents: -4720, payeeName: 'Hometown Hardware' },
+  { accountId: visa, date: '2026-02-03', amountCents: -1499, payeeName: 'AppleOne', category: 'Subscriptions: Streaming & Media' },
+  { accountId: visa, date: '2026-02-03', amountCents: -4720, payeeName: 'Hometown Hardware', category: 'Housing: Repairs & Maintenance' },
 ];
 
-for (const transaction of sampleTransactions) {
-  db.createTransaction(transaction);
+for (const { category, ...transaction } of sampleTransactions) {
+  // Turn the label into an id; a typo in a label above stops the seed loudly
+  // instead of silently leaving the transaction uncategorized.
+  const categoryId = category ? categoryIds.get(category) : null;
+  if (categoryId === undefined) throw new Error(`Unknown category label in seed data: "${category}"`);
+  db.createTransaction({ ...transaction, categoryId });
 }
 
 console.log(
-  `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts ` +
-    `and ${sampleTransactions.length} transactions.`
+  `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts, ` +
+    `${categoryIds.size} categories and ${sampleTransactions.length} transactions.`
 );

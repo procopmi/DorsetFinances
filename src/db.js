@@ -110,11 +110,50 @@ function allOrNothing(work) {
   }
 }
 
+// --- Categories ---
+
+// Every category, groups and subs together, in display order. A row with
+// parent_id null is a group; the others are subs that belong to a group.
+// Hidden ones are included so existing transactions can still show their
+// names; the page leaves them out of the suggestions.
+export function listCategories() {
+  return db
+    .prepare(
+      `SELECT id, name, parent_id, kind, is_hidden, sort_order
+         FROM categories
+        ORDER BY sort_order, id`
+    )
+    .all();
+}
+
+export function getCategory(id) {
+  return db.prepare('SELECT id, name, parent_id, kind, is_hidden FROM categories WHERE id = ?').get(id);
+}
+
+// Adds a group (parentId null) or a sub (parentId = its group) and returns the new id.
+export function createCategory({ name, kind, parentId = null, sortOrder = 0 }) {
+  const result = db
+    .prepare('INSERT INTO categories (name, kind, parent_id, sort_order) VALUES (?, ?, ?, ?)')
+    .run(name, kind, parentId, sortOrder);
+  return Number(result.lastInsertRowid);
+}
+
 // --- Payees ---
 
-// Payee names for autocomplete, alphabetically.
+// Payees for autocomplete, alphabetically, with the category to fill in
+// automatically when one is chosen.
 export function listPayees() {
-  return db.prepare('SELECT id, name FROM payees WHERE is_hidden = 0 ORDER BY name').all();
+  return db
+    .prepare('SELECT id, name, default_category_id FROM payees WHERE is_hidden = 0 ORDER BY name')
+    .all();
+}
+
+// Remembers the category most recently used with a payee, so picking that
+// payee next time fills it in. Called whenever a transaction is saved.
+function rememberPayeeCategory(payeeId, categoryId) {
+  if (payeeId && categoryId) {
+    db.prepare('UPDATE payees SET default_category_id = ? WHERE id = ?').run(categoryId, payeeId);
+  }
 }
 
 // Returns the id of the payee with this name, creating it if it's new. The
@@ -130,12 +169,14 @@ function findOrCreatePayee(name) {
 
 // Adds a transaction and returns its new id. amountCents is signed:
 // positive = money in, negative = money out. payeeName is plain text; the
-// matching payee is looked up or created here.
+// matching payee is looked up or created here. categoryId may be null
+// (uncategorized).
 export function createTransaction({
   accountId,
   date,
   amountCents,
   payeeName = null,
+  categoryId = null,
   memo = null,
   checkNumber = null,
   status = 'uncleared',
@@ -144,18 +185,22 @@ export function createTransaction({
     const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
     const result = db
       .prepare(
-        `INSERT INTO transactions (account_id, date, amount_cents, payee_id, memo, check_number, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO transactions
+           (account_id, date, amount_cents, payee_id, category_id, memo, check_number, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(accountId, date, amountCents, payeeId, memo, checkNumber, status);
+      .run(accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status);
+    rememberPayeeCategory(payeeId, categoryId);
     return Number(result.lastInsertRowid);
   });
 }
 
-// Changes the fields you can edit in the register. Status and category are
-// left as they are (they have their own controls). Returns false if there's
-// no transaction with that id.
-export function updateTransaction(id, { date, amountCents, payeeName = null, memo = null, checkNumber = null }) {
+// Changes the fields you can edit in the register. Status is left as it is
+// (it has its own controls). Returns false if there's no transaction with that id.
+export function updateTransaction(
+  id,
+  { date, amountCents, payeeName = null, categoryId = null, memo = null, checkNumber = null }
+) {
   return allOrNothing(() => {
     // Check first, so a missing transaction doesn't leave a new payee behind.
     if (!db.prepare('SELECT 1 FROM transactions WHERE id = ?').get(id)) return false;
@@ -163,10 +208,11 @@ export function updateTransaction(id, { date, amountCents, payeeName = null, mem
     const payeeId = payeeName ? findOrCreatePayee(payeeName) : null;
     db.prepare(
       `UPDATE transactions
-          SET date = ?, amount_cents = ?, payee_id = ?, memo = ?, check_number = ?,
+          SET date = ?, amount_cents = ?, payee_id = ?, category_id = ?, memo = ?, check_number = ?,
               updated_at = datetime('now')
         WHERE id = ?`
-    ).run(date, amountCents, payeeId, memo, checkNumber, id);
+    ).run(date, amountCents, payeeId, categoryId, memo, checkNumber, id);
+    rememberPayeeCategory(payeeId, categoryId);
     return true;
   });
 }
@@ -181,14 +227,17 @@ export function deleteTransaction(id) {
 //
 // Payee and category names are looked up by joining their tables. LEFT JOIN
 // keeps a transaction even when it has no payee or category yet (name = null).
+// The category is shown as "Group: Sub", so the categories table is joined a
+// second time (as "g") to get the sub's group name.
 export function getRegister(accountId) {
   return db
     .prepare(
       `SELECT t.id, t.date, t.check_number, t.memo, t.amount_cents, t.status,
-              p.name AS payee, c.name AS category
+              p.name AS payee, t.category_id, g.name || ': ' || c.name AS category
          FROM transactions t
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN categories g ON g.id = c.parent_id
         WHERE t.account_id = ?
         ORDER BY t.date, t.id`
     )

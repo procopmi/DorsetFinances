@@ -145,8 +145,14 @@ let editingId = null;       // id of the transaction open for editing, if any
 let focusedRowId = null;    // last transaction row you moved to with the keyboard
 let lastEnteredDate = null; // new rows start with this date (see newRowDate)
 
-// Fetches the selected account's register (and the payee list for
-// autocomplete), then redraws the grid.
+// For the Payee and Category boxes: the payee list (with each payee's default
+// category), and one entry per sub-category: { id, label: "Group: Sub",
+// subName, isHidden }.
+let payees = [];
+let categoryChoices = [];
+
+// Fetches the selected account's register, plus the payee and category lists
+// for autocomplete, then redraws the grid.
 async function loadRegister() {
   const accountId = selectedId;
   if (accountId === null) {
@@ -155,9 +161,10 @@ async function loadRegister() {
     return;
   }
 
-  const [register, payees] = await Promise.all([
+  const [register, payeeList, categoryList] = await Promise.all([
     getJson(`/api/register?accountId=${accountId}`),
     getJson('/api/payees'),
+    getJson('/api/categories'),
   ]);
 
   // If you clicked another account while this was loading, a newer load is
@@ -165,18 +172,59 @@ async function loadRegister() {
   if (accountId !== selectedId) return;
 
   currentRegister = register;
-  fillPayeeOptions(payees);
+  payees = payeeList;
+  categoryChoices = buildCategoryChoices(categoryList);
+  fillOptions('payee-options', payees.map((p) => p.name));
+  fillOptions(
+    'category-options',
+    categoryChoices.filter((c) => !c.isHidden).map((c) => c.label)
+  );
   renderRows();
 }
 
-// The browser's built-in suggestion list for the Payee field.
-function fillPayeeOptions(payees) {
-  const options = payees.map((payee) => {
+// Turns the flat category list from the server into "Group: Sub" choices, in
+// display order: each group's subs, group by group. A sub counts as hidden
+// if it or its group is hidden.
+function buildCategoryChoices(categoryList) {
+  const groups = categoryList.filter((c) => c.parent_id === null);
+  return groups.flatMap((group) =>
+    categoryList
+      .filter((c) => c.parent_id === group.id)
+      .map((sub) => ({
+        id: sub.id,
+        label: `${group.name}: ${sub.name}`,
+        subName: sub.name,
+        isHidden: Boolean(group.is_hidden || sub.is_hidden),
+      }))
+  );
+}
+
+// Fills one of the browser's built-in suggestion lists (<datalist>).
+function fillOptions(listId, values) {
+  const options = values.map((value) => {
     const option = document.createElement('option');
-    option.value = payee.name;
+    option.value = value;
     return option;
   });
-  byId('payee-options').replaceChildren(...options);
+  byId(listId).replaceChildren(...options);
+}
+
+// Finds the category for what was typed in the Category box: the full
+// "Group: Sub" label, or just the sub's name when only one sub has it
+// ("Groceries" works; "Pay" doesn't, as both Cindy and Michael have one).
+// Capitalization doesn't matter. Returns null for a blank box and
+// undefined when nothing (or more than one thing) matches.
+function findCategoryId(text) {
+  const wanted = text.trim().toLowerCase();
+  if (wanted === '') return null;
+
+  for (const matches of [
+    categoryChoices.filter((c) => c.label.toLowerCase() === wanted),
+    categoryChoices.filter((c) => c.subName.toLowerCase() === wanted),
+  ]) {
+    if (matches.length === 1) return matches[0].id;
+  }
+  return undefined;
 }
 
 // Draws the grid from currentRegister: opening line, one line per
@@ -305,14 +353,24 @@ function buildEditorRow(values, statusMark, { onSave, onCancel }) {
     date: makeInput('date', { type: 'date', value: values.date }),
     checkNumber: makeInput('checkNumber', { value: values.checkNumber ?? '' }),
     payee: makeInput('payee', { value: values.payee ?? '' }),
-    // Categories arrive in milestone 5; the box is here so the layout is final.
-    category: makeInput('category', { disabled: true, placeholder: 'later' }),
+    category: makeInput('category', { value: values.category ?? '' }),
     memo: makeInput('memo', { value: values.memo ?? '' }),
     outflow: makeInput('outflow', { value: values.outflow ?? '', inputMode: 'decimal', className: 'money-input' }),
     inflow: makeInput('inflow', { value: values.inflow ?? '', inputMode: 'decimal', className: 'money-input' }),
   };
-  // Connects the field to the <datalist> of payee names in index.html.
+  // Connects each box to its <datalist> of suggestions in index.html.
   fields.payee.setAttribute('list', 'payee-options');
+  fields.category.setAttribute('list', 'category-options');
+
+  // Once a payee is chosen, fill in the category last used with it, unless
+  // you've already typed a category. ("change" fires when you leave the box.)
+  fields.payee.addEventListener('change', () => {
+    if (fields.category.value.trim() !== '') return;
+    const typed = fields.payee.value.trim().toLowerCase();
+    const payee = payees.find((p) => p.name.toLowerCase() === typed);
+    const choice = payee && categoryChoices.find((c) => c.id === payee.default_category_id);
+    if (choice) fields.category.value = choice.label;
+  });
 
   // An amount goes in one column or the other, so typing in one clears the other.
   fields.outflow.addEventListener('input', () => {
@@ -352,9 +410,11 @@ function buildEditorRow(values, statusMark, { onSave, onCancel }) {
       // On the Delete button, Enter should press the button, not save.
       if (event.target.tagName === 'BUTTON') return;
       event.preventDefault();
+      // In the Payee and Category boxes, Enter accepts the suggestion and moves
+      // on to the next box, rather than saving before you've finished the line.
       if (event.target === fields.payee) {
-        // In the Payee box, Enter accepts the suggestion and moves on to Memo,
-        // rather than saving before you've finished the line.
+        fields.category.focus();
+      } else if (event.target === fields.category) {
         fields.memo.focus();
       } else {
         runAction(onSave);
@@ -388,6 +448,7 @@ function buildEditRow(t) {
       date: t.date,
       checkNumber: t.check_number,
       payee: t.payee,
+      category: t.category,
       memo: t.memo,
       ...splitAmount(t.amount_cents),
     },
@@ -433,10 +494,21 @@ function readFields(fields) {
     throw problem(`Leave out the minus sign; use the ${outText ? inName : outName} column instead.`, amountField);
   }
 
+  // Categories are a fixed list (managed on their own screen), so unlike
+  // payees, an unknown name is a mistake rather than something to create.
+  const categoryId = findCategoryId(fields.category.value);
+  if (categoryId === undefined) {
+    throw problem(
+      `"${fields.category.value.trim()}" doesn't match one category. Pick one from the suggestions.`,
+      fields.category
+    );
+  }
+
   return {
     date: fields.date.value,
     checkNumber: fields.checkNumber.value,
     payee: fields.payee.value,
+    categoryId,
     memo: fields.memo.value,
     amountCents: outText ? -cents : cents,
   };

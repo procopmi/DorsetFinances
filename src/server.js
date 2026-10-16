@@ -71,12 +71,27 @@ function optionalText(value, label, maxLength) {
   return trimmed === '' ? null : trimmed;
 }
 
+// A category id, or null for "uncategorized". Only sub-categories can be
+// assigned; groups (like "Utilities") exist to total up their subs.
+// Hidden categories are allowed, so an older transaction that uses one can
+// still be edited and saved; hiding only removes it from the suggestions.
+function optionalCategoryId(value) {
+  if (value === undefined || value === null) return null;
+  const category = db.getCategory(requireId(value));
+  if (!category) throw httpError(400, 'No such category');
+  if (category.parent_id === null) {
+    throw httpError(400, `"${category.name}" is a group; choose one of its sub-categories`);
+  }
+  return category.id;
+}
+
 // The register fields shared by "add" and "edit".
 function readTransactionFields(body) {
   return {
     date: requireDate(body.date),
     checkNumber: optionalText(body.checkNumber, 'Check number', 20),
     payeeName: optionalText(body.payee, 'Payee', 100),
+    categoryId: optionalCategoryId(body.categoryId),
     memo: optionalText(body.memo, 'Memo', 200),
     amountCents: requireCents(body.amountCents),
   };
@@ -116,6 +131,8 @@ const apiRoutes = {
   },
 
   'GET /api/payees': () => db.listPayees(),
+
+  'GET /api/categories': () => db.listCategories(),
 
   'POST /api/transactions': (body) => {
     const accountId = requireId(body.accountId);
