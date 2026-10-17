@@ -342,30 +342,118 @@ export function findPayeeByName(name) {
   return db.prepare('SELECT id, name, default_category_id FROM payees WHERE name = ?').get(name);
 }
 
-// Adds imported rows to an account, all or nothing: if any row fails, none
-// are added. Each row is { date, amountCents, payeeName, categoryId, memo,
-// checkNumber, bankDescription, fingerprint }. Imported rows are marked
-// cleared, since the bank has already processed them. Returns how many were added.
+// Rows you entered by hand in `accountId` that an import row may be the
+// bank's copy of: same amount, not yet cleared, not themselves imported,
+// dated within `days` days. Best first: a matching check number, then the
+// closest date.
+export function findHandEnteredMatches({ accountId, amountCents, date, checkNumber }, days = 5) {
+  return db
+    .prepare(
+      `SELECT t.id, t.date, t.amount_cents, t.check_number, t.memo, p.name AS payee
+         FROM transactions t
+         LEFT JOIN payees p ON p.id = t.payee_id
+        WHERE t.account_id = ? AND t.amount_cents = ? AND t.status = 'uncleared'
+          AND t.import_hash IS NULL
+          AND ABS(julianday(t.date) - julianday(?)) <= ?
+        ORDER BY (t.check_number IS NOT NULL AND t.check_number = ?) DESC,
+                 ABS(julianday(t.date) - julianday(?)), t.id`
+    )
+    .all(accountId, amountCents, date, days, checkNumber ?? '', date);
+}
+
+// Adds imported rows to an account, all or nothing: if any row fails,
+// nothing changes. Each row is { date, amountCents, payeeName, categoryId,
+// memo, checkNumber, bankDescription, fingerprint } plus optionally:
+//   handEnteredId - the bank's copy of a row you entered by hand: instead of
+//                   adding a new row, that row is marked cleared and given
+//                   the bank's text. Your payee and category are kept.
+//   linkToId      - the other half of a transfer, already in another
+//                   account: the new row is linked to it.
+//   rule          - { pattern } to remember: bank text containing it gets
+//                   this row's payee on future imports.
+// Imported rows are marked cleared, since the bank has already processed them.
+// Returns counts: { added, matched, linked, rules }.
 export function importTransactions(accountId, rows) {
   return allOrNothing(() => {
+    const counts = { added: 0, matched: 0, linked: 0, rules: 0 };
+
     for (const row of rows) {
+      if (row.handEnteredId) {
+        db.prepare(
+          `UPDATE transactions
+              SET status = 'cleared', bank_description = ?, import_hash = ?, updated_at = datetime('now')
+            WHERE id = ?`
+        ).run(row.bankDescription, row.fingerprint, row.handEnteredId);
+        counts.matched++;
+        continue;
+      }
+
       const payeeId = row.payeeName ? findOrCreatePayee(row.payeeName) : null;
-      insertTransaction({
+      const id = insertTransaction({
         accountId,
         date: row.date,
         amountCents: row.amountCents,
         payeeId,
-        categoryId: row.categoryId,
+        categoryId: row.linkToId ? null : row.categoryId,
         memo: row.memo,
         checkNumber: row.checkNumber,
         status: 'cleared',
         bankDescription: row.bankDescription,
         importHash: row.fingerprint,
       });
-      rememberPayeeCategory(payeeId, row.categoryId);
+      counts.added++;
+
+      if (row.linkToId) {
+        pairAsTransfer(id, row.linkToId);
+        counts.linked++;
+      } else {
+        rememberPayeeCategory(payeeId, row.categoryId);
+      }
+
+      if (row.rule && payeeId) {
+        savePayeeRule({ matchType: 'contains', pattern: row.rule.pattern, payeeId });
+        counts.rules++;
+      }
     }
-    return rows.length;
+    return counts;
   });
+}
+
+// --- Payee rules ---
+
+// Every rule, with the name and usual category of the payee it produces.
+export function listPayeeRules() {
+  return db
+    .prepare(
+      `SELECT r.id, r.match_type, r.pattern, r.payee_id,
+              p.name AS payee_name, p.default_category_id
+         FROM payee_rules r
+         JOIN payees p ON p.id = r.payee_id
+        ORDER BY p.name, r.pattern`
+    )
+    .all();
+}
+
+// Adds a rule, or, if the same kind of rule with the same pattern already
+// exists (ignoring capitals), points it at this payee instead of making a
+// second, conflicting one.
+function savePayeeRule({ matchType, pattern, payeeId }) {
+  const existing = db
+    .prepare('SELECT id FROM payee_rules WHERE match_type = ? AND pattern = ? COLLATE NOCASE')
+    .get(matchType, pattern);
+  if (existing) {
+    db.prepare('UPDATE payee_rules SET payee_id = ? WHERE id = ?').run(payeeId, existing.id);
+  } else {
+    db.prepare('INSERT INTO payee_rules (match_type, pattern, payee_id) VALUES (?, ?, ?)').run(
+      matchType,
+      pattern,
+      payeeId
+    );
+  }
+}
+
+export function deletePayeeRule(id) {
+  return db.prepare('DELETE FROM payee_rules WHERE id = ?').run(id).changes > 0;
 }
 
 // --- Backups ---
@@ -499,6 +587,15 @@ export function unlinkTransfer(id) {
 // Closest dates first.
 export function findTransferCandidates(id, days = 7) {
   const row = getTransaction(id);
+  return findTransferCandidatesFor(
+    { accountId: row.account_id, amountCents: row.amount_cents, date: row.date },
+    days
+  );
+}
+
+// The same search for a row that isn't saved yet (a row in an import file):
+// rows outside `accountId` with the opposite of `amountCents`, near `date`.
+export function findTransferCandidatesFor({ accountId, amountCents, date }, days = 7) {
   return db
     .prepare(
       `SELECT t.id, t.date, t.amount_cents, t.memo, t.status, a.name AS account, p.name AS payee
@@ -509,7 +606,7 @@ export function findTransferCandidates(id, days = 7) {
           AND ABS(julianday(t.date) - julianday(?)) <= ?
         ORDER BY ABS(julianday(t.date) - julianday(?)), t.id`
     )
-    .all(row.account_id, -row.amount_cents, row.date, days, row.date);
+    .all(accountId, -amountCents, date, days, date);
 }
 
 // status is 'uncleared', 'cleared' or 'reconciled' (the server checks).

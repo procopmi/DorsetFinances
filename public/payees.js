@@ -10,15 +10,18 @@ import { buildCategoryChoices } from '/register.js';
 
 let payees = [];          // every payee, hidden ones too, with use_count
 let categoryChoices = []; // "Group: Sub" choices for the default-category dropdown
+let rules = [];           // import rules (bank text -> payee), shown with their payee
 
 // Called by main.js whenever this screen is shown.
 export async function show() {
-  const [payeeList, categoryList] = await Promise.all([
+  const [payeeList, categoryList, ruleList] = await Promise.all([
     getJson('/api/payees/all'),
     getJson('/api/categories'),
+    getJson('/api/payee-rules'),
   ]);
   payees = payeeList;
   categoryChoices = buildCategoryChoices(categoryList);
+  rules = ruleList;
 
   // Suggestions for the "Merge into" box: every payee name.
   const options = payees.map((p) => new Option(p.name));
@@ -47,12 +50,33 @@ function buildRow(payee) {
   usesCell.className = 'col-money';
   usesCell.textContent = payee.use_count;
 
+  const rulesCell = document.createElement('td');
+  rulesCell.append(...rules.filter((r) => r.payee_id === payee.id).map(buildRuleChip));
+
   const actionsCell = document.createElement('td');
   actionsCell.className = 'payee-actions';
   showActions(actionsCell, payee);
 
-  row.append(nameCell, categoryCell, usesCell, actionsCell);
+  row.append(nameCell, categoryCell, usesCell, rulesCell, actionsCell);
   return row;
+}
+
+// One import rule, e.g. [contains "WEGMANS" ✕]. ✕ deletes it, after asking.
+// Deleting a rule changes no transactions; future imports just stop using it.
+const RULE_WORDS = { contains: 'contains', starts_with: 'starts with', exact: 'is exactly' };
+
+function buildRuleChip(rule) {
+  const chip = document.createElement('span');
+  chip.className = 'tag rule-chip';
+  chip.textContent = `${RULE_WORDS[rule.match_type]} "${rule.pattern}" `;
+  chip.append(
+    makeButton('✕', async () => {
+      if (!confirm(`Stop turning bank text that ${RULE_WORDS[rule.match_type]} "${rule.pattern}" into "${rule.payee_name}"?`)) return;
+      await postJson('/api/payee-rules/delete', { id: rule.id });
+      await show();
+    }, 'rule-delete')
+  );
+  return chip;
 }
 
 // The normal buttons for a row.

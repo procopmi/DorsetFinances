@@ -16,6 +16,7 @@ import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
 import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
+import { matchRule, suggestPattern } from './rules.js';
 
 // --- Input checks ---
 //
@@ -149,6 +150,26 @@ function readTransactionFields(body, ownAccountId, currentOtherAccountId) {
   };
 }
 
+// Bank row types that usually mean money moving between your own accounts.
+// Used only to add a hint in the preview.
+function looksLikeTransfer(formatId, bankType) {
+  if (formatId === 'chase-card') return bankType === 'Payment';
+  return bankType === 'ACCT_XFER' || bankType === 'LOAN_PMT';
+}
+
+// The bank's own balance after its most recent row, from a checking/savings
+// file: { date, cents }, or null if the file has no balances (card files).
+// For several rows on the latest date, the first one in the file is taken,
+// since the bank lists newest first.
+function latestBankBalance(rows) {
+  let latest = null;
+  for (const row of rows) {
+    if (row.bankBalanceCents === null) continue;
+    if (!latest || row.date > latest.date) latest = { date: row.date, cents: row.bankBalanceCents };
+  }
+  return latest;
+}
+
 // The account and the parsed bank file for an import request.
 function readImportFile(body) {
   const account = db.getAccount(requireId(body.accountId));
@@ -241,31 +262,85 @@ const apiRoutes = {
   // than trusting rows sent back by the page) means dates and amounts always
   // come straight from the bank's file.
 
+  // For each row the preview suggests, in this order:
+  //   - a payee: from a remembered rule, else a payee named like the bank
+  //     text, else the bank text itself (plus that payee's usual category);
+  //   - a hand-entered row it's the bank's copy of (use that instead), or
+  //   - the other half of a transfer already in another account (link it).
   'POST /api/import/preview': (body) => {
     const { account, parsed } = readImportFile(body);
     const alreadyImported = db.importedFingerprints(account.id);
+    const rules = db.listPayeeRules();
+    // Each existing row can be matched to only one row of the file, so two
+    // identical bank rows don't both claim the same hand-entered row.
+    const claimed = new Set();
 
     const rows = parsed.rows.map((row) => {
-      // Start the payee as the bank's description; if a payee by that name
-      // already exists, suggest its usual category too.
-      const payee = db.findPayeeByName(row.description);
-      return {
+      const result = {
         ...row,
         isDuplicate: alreadyImported.has(row.fingerprint),
-        suggestedPayee: payee?.name ?? row.description,
-        suggestedCategoryId: payee?.default_category_id ?? null,
+        suggestedPattern: suggestPattern(row.description),
+        suggestedPayee: row.description,
+        suggestedCategoryId: null,
+        rule: null,
+        handEntered: null,
+        transferMatch: null,
+        otherTransferMatches: 0,
+        looksLikeTransfer: looksLikeTransfer(parsed.format.id, row.bankType),
       };
+      if (result.isDuplicate) return result;
+
+      const rule = matchRule(row.description, rules);
+      const payee = rule
+        ? { name: rule.payee_name, default_category_id: rule.default_category_id }
+        : db.findPayeeByName(row.description);
+      if (payee) {
+        result.suggestedPayee = payee.name;
+        result.suggestedCategoryId = payee.default_category_id;
+      }
+      if (rule) result.rule = { matchType: rule.match_type, pattern: rule.pattern };
+
+      const where = { accountId: account.id, amountCents: row.amountCents, date: row.date };
+      const handEntered = db
+        .findHandEnteredMatches({ ...where, checkNumber: row.checkNumber })
+        .find((m) => !claimed.has(m.id));
+      if (handEntered) {
+        claimed.add(handEntered.id);
+        result.handEntered = handEntered;
+        return result;
+      }
+
+      const candidates = db.findTransferCandidatesFor(where).filter((c) => !claimed.has(c.id));
+      // Only suggest a link when there's exactly one candidate; with several,
+      // choosing is left to "Link…" in the register.
+      if (candidates.length === 1) {
+        claimed.add(candidates[0].id);
+        result.transferMatch = candidates[0];
+      } else {
+        result.otherTransferMatches = candidates.length;
+      }
+      return result;
     });
-    return { format: parsed.format, problems: parsed.problems, rows };
+
+    return {
+      format: parsed.format,
+      problems: parsed.problems,
+      rows,
+      bankBalance: latestBankBalance(parsed.rows),
+    };
   },
 
-  // choices: [{ fingerprint, payee, categoryId }] for the rows you kept ticked.
+  // choices: one per row you kept ticked:
+  //   { fingerprint, payee, categoryId, handEnteredId?, linkToId?, rememberPattern? }
   'POST /api/import/commit': (body) => {
     const { account, parsed } = readImportFile(body);
     if (!Array.isArray(body.choices)) throw httpError(400, 'No rows chosen');
 
     const byFingerprint = new Map(parsed.rows.map((row) => [row.fingerprint, row]));
     const alreadyImported = db.importedFingerprints(account.id);
+    const used = new Set(); // existing rows already matched or linked by this import
+    const changed = () =>
+      httpError(400, 'Something changed since the preview. Please start the import again.');
     const toImport = [];
     let skipped = 0;
 
@@ -279,7 +354,8 @@ const apiRoutes = {
         continue;
       }
       alreadyImported.add(row.fingerprint);
-      toImport.push({
+
+      const item = {
         date: row.date,
         amountCents: row.amountCents,
         payeeName: optionalText(choice.payee, 'Payee', 100),
@@ -288,13 +364,65 @@ const apiRoutes = {
         checkNumber: row.checkNumber,
         bankDescription: row.description,
         fingerprint: row.fingerprint,
-      });
+      };
+
+      // Each match is checked again, in case the register changed since the preview.
+      if (choice.handEnteredId != null) {
+        const existing = db.getTransaction(requireId(choice.handEnteredId));
+        const stillMatches =
+          existing &&
+          existing.account_id === account.id &&
+          existing.amount_cents === row.amountCents &&
+          existing.status === 'uncleared' &&
+          !used.has(existing.id);
+        if (!stillMatches) throw changed();
+        used.add(existing.id);
+        item.handEnteredId = existing.id;
+      } else if (choice.linkToId != null) {
+        const other = db.getTransaction(requireId(choice.linkToId));
+        const stillMatches =
+          other &&
+          other.account_id !== account.id &&
+          other.amount_cents === -row.amountCents &&
+          other.transfer_id === null &&
+          !used.has(other.id);
+        if (!stillMatches) throw changed();
+        used.add(other.id);
+        item.linkToId = other.id;
+      }
+
+      if (choice.rememberPattern != null) {
+        const pattern = optionalText(choice.rememberPattern, 'Rule pattern', 100);
+        if (!pattern) throw httpError(400, `${row.date} ${row.description}: the rule needs some text to look for`);
+        if (!item.payeeName) throw httpError(400, `${row.date} ${row.description}: a rule needs a payee`);
+        item.rule = { pattern };
+      }
+      toImport.push(item);
     }
 
     // Back up before changing anything (project rule: back up before an import).
     const backupFile = toImport.length > 0 ? makeBackup('import') : null;
-    const imported = db.importTransactions(account.id, toImport);
-    return { imported, skipped, backupFile };
+    const counts = db.importTransactions(account.id, toImport);
+
+    // For the check against the bank: your cleared balance now, next to the
+    // bank's own balance from the file (checking and savings files only).
+    const register = db.getRegister(account.id);
+    return {
+      ...counts,
+      skipped,
+      backupFile,
+      clearedBalanceCents: clearedBalance(account.opening_balance_cents, register),
+      bankBalance: latestBankBalance(parsed.rows),
+    };
+  },
+
+  // --- Payee rules (listed and deleted on the Payees screen) ---
+
+  'GET /api/payee-rules': () => db.listPayeeRules(),
+
+  'POST /api/payee-rules/delete': (body) => {
+    if (!db.deletePayeeRule(requireId(body.id))) throw httpError(404, 'No such rule');
+    return { ok: true };
   },
 
   // Set one transaction to uncleared, cleared or reconciled.

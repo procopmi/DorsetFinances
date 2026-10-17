@@ -109,6 +109,22 @@ body {
   padding: 1px 4px;
 }
 
+/* The Note column: one line per suggestion (match, rule, bank hint). */
+.import-note {
+  white-space: normal;
+  font-size: 12px;
+  min-width: 260px;
+}
+
+.import-note .note-line {
+  display: block;
+}
+
+.import-panel input.pattern-input {
+  width: 9em;
+  margin: 0 4px;
+}
+
 /* A row that will be skipped (already imported, or unticked). */
 .import-panel tr.skipped td {
   color: var(--muted);
@@ -178,6 +194,19 @@ body {
 .payee-actions {
   display: flex;
   gap: 6px;
+}
+
+.rule-chip {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+}
+
+button.rule-delete {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--muted);
 }
 
 h2 {
