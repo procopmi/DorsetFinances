@@ -216,6 +216,19 @@ export function buildCategoryChoices(categoryList) {
   );
 }
 
+// "Group: Sub" for a category id, or '' if there's none. (Also used by import.js.)
+export function categoryLabel(categoryId) {
+  return categoryChoices.find((c) => c.id === categoryId)?.label ?? '';
+}
+
+// The usual category of the payee with this name, as "Group: Sub", or ''
+// if the payee is new or has no default. (Also used by import.js.)
+export function defaultCategoryLabelForPayee(name) {
+  const typed = name.trim().toLowerCase();
+  const payee = payees.find((p) => p.name.toLowerCase() === typed);
+  return payee ? categoryLabel(payee.default_category_id) : '';
+}
+
 // Fills one of the browser's built-in suggestion lists (<datalist>).
 function fillOptions(listId, values) {
   const options = values.map((value) => {
@@ -231,7 +244,8 @@ function fillOptions(listId, values) {
 // ("Groceries" works; "Pay" doesn't, as both Cindy and Michael have one).
 // Capitalization doesn't matter. Returns null for a blank box and
 // undefined when nothing (or more than one thing) matches.
-function findCategoryId(text) {
+// (Also used by the import preview, import.js.)
+export function findCategoryId(text) {
   const wanted = text.trim().toLowerCase();
   if (wanted === '') return null;
 
@@ -287,6 +301,8 @@ function renderRows() {
   const lockButton = byId('reconcile-cleared');
   lockButton.hidden = !canEdit;
   lockButton.disabled = !register.rows.some((r) => r.status === 'cleared');
+  // Importing adds rows, so it's not offered for a closed (read-only) account.
+  byId('show-import').hidden = !canEdit;
 }
 
 // Shows "Label: 1,234.56" in a header element, in red when below zero.
@@ -494,10 +510,7 @@ function buildEditorRow(values, statusMark, { onSave, onCancel }) {
   // you've already typed a category. ("change" fires when you leave the box.)
   fields.payee.addEventListener('change', () => {
     if (fields.category.value.trim() !== '') return;
-    const typed = fields.payee.value.trim().toLowerCase();
-    const payee = payees.find((p) => p.name.toLowerCase() === typed);
-    const choice = payee && categoryChoices.find((c) => c.id === payee.default_category_id);
-    if (choice) fields.category.value = choice.label;
+    fields.category.value = defaultCategoryLabelForPayee(fields.payee.value);
   });
 
   // An amount goes in one column or the other, so typing in one clears the other.
@@ -895,7 +908,8 @@ form.addEventListener('keydown', (event) => {
 
 // --- Actions on the selected account ---
 
-const selectedAccount = () => accounts.find((a) => a.id === selectedId);
+// The account shown in the register. (Also used by import.js.)
+export const selectedAccount = () => accounts.find((a) => a.id === selectedId);
 
 byId('rename-account').addEventListener('click', () =>
   runAction(async () => {

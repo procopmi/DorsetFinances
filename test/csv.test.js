@@ -1,8 +1,11 @@
-// Tests for CSV writing and the register export. Run with: npm test
+// Tests for CSV: writing the register export and reading bank downloads. Run with: npm test
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { csvField, safeText, buildCsv, exportRegisterCsv } from '../src/csv.js';
+import {
+  csvField, safeText, buildCsv, exportRegisterCsv,
+  parseCsv, decodeEntities, parseBankDate, parseBankCsv,
+} from '../src/csv.js';
 import { centsToPlainText } from '../src/money.js';
 
 // --- Plain amounts ---
@@ -41,7 +44,7 @@ test('text that a spreadsheet would treat as a formula is made plain text', () =
 
 test('a CSV file has a header marker, comma-joined fields and \\r\\n line ends', () => {
   const text = buildCsv([['a', 'b,c'], ['1', '2']]);
-  assert.equal(text, '﻿a,"b,c"\r\n1,2\r\n');
+  assert.equal(text, '\uFEFFa,"b,c"\r\n1,2\r\n');
 });
 
 // --- Register export ---
@@ -72,7 +75,7 @@ const checking = {
 };
 
 // The exported lines, without the leading marker, split back into lines.
-const linesOf = (csv) => csv.replace('﻿', '').trimEnd().split('\r\n');
+const linesOf = (csv) => csv.replace('\uFEFF', '').trimEnd().split('\r\n');
 
 test('the export has the header and one line per transaction', () => {
   const lines = linesOf(exportRegisterCsv([checking]));
@@ -107,4 +110,115 @@ test('all-accounts export keeps each account\'s own running balance', () => {
   const lines = linesOf(exportRegisterCsv([checking, savings]));
   assert.equal(lines.length, 5);
   assert.equal(lines[4], '2026-02-10,Rainy Day Savings,,,Transfer,Everyday Checking,,500.00,uncleared,500.00');
+});
+
+// --- Reading bank downloads ---
+//
+// Built from the owner's sample rows (details already altered). Real checking
+// downloads end each data row with an extra empty column, so these do too.
+
+const DEPOSIT_FILE = [
+  'Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #',
+  'CREDIT,9/14/26,Transfer from Savings,100,ACCT_XFER,2397.55,,',
+  'DEBIT,1/5/26,Wegmans,-100,DEBIT_CARD,4199.64,,',
+  'CHECK,2/13/26,CHECK 259,-100,CHECK_PAID,5293.39,259,',
+  'CREDIT,4/16/26,"Repayment, dinner",100,PARTNERFI_TO_CHASE,6253.71,,',
+].join('\r\n');
+
+const CARD_FILE = [
+  'Transaction Date,Post Date,Description,Category,Type,Amount,Memo',
+  '9/18/26,9/22/26,Offer:Deal Lake Bar &amp; Co.,Fees & Adjustments,Adjustment,4.75,',
+  '9/4/26,9/4/26,Payment Thank You,,Payment,500,',
+  '8/28/26,8/30/26,Car Service,Automotive,Sale,-200,',
+].join('\n');
+
+test('parseCsv handles quoted commas, doubled quotes and line breaks inside quotes', () => {
+  const rows = parseCsv('a,"b, c","say ""hi"""\r\n"two\nlines",x,y\n\nlast,1,2');
+  assert.deepEqual(rows.map((r) => r.fields), [
+    ['a', 'b, c', 'say "hi"'],
+    ['two\nlines', 'x', 'y'],
+    ['last', '1', '2'],
+  ]);
+  // Line numbers count the line break inside quotes and skip the blank line.
+  assert.deepEqual(rows.map((r) => r.line), [1, 2, 5]);
+});
+
+test('bank dates M/D/YY become YYYY-MM-DD; impossible dates are refused', () => {
+  assert.equal(parseBankDate('9/14/26'), '2026-09-14');
+  assert.equal(parseBankDate('01/05/2026'), '2026-01-05');
+  assert.equal(parseBankDate('2/29/28'), '2028-02-29');
+  assert.equal(parseBankDate('2/30/26'), null);
+  assert.equal(parseBankDate('13/1/26'), null);
+  assert.equal(parseBankDate('2026-01-05'), null);
+});
+
+test('web-page codes in descriptions are turned back into characters', () => {
+  assert.equal(decodeEntities('Deal Lake Bar &amp; Co.'), 'Deal Lake Bar & Co.');
+  assert.equal(decodeEntities('Joe&#39;s'), "Joe's");
+  assert.equal(decodeEntities('AT&T'), 'AT&T');
+});
+
+test('a checking download is recognised and read', () => {
+  const { format, rows, problems } = parseBankCsv(DEPOSIT_FILE, 'checking');
+  assert.equal(format.id, 'chase-deposit');
+  assert.deepEqual(problems, []);
+  assert.equal(rows.length, 4);
+
+  const [transfer, wegmans, check, repayment] = rows;
+  assert.equal(transfer.date, '2026-09-14');
+  assert.equal(transfer.amountCents, 10000);
+  assert.equal(transfer.bankType, 'ACCT_XFER');
+  assert.equal(transfer.bankBalanceCents, 239755);
+  assert.equal(wegmans.amountCents, -10000);
+  assert.equal(check.checkNumber, '259');
+  assert.equal(wegmans.checkNumber, null);
+  assert.equal(repayment.description, 'Repayment, dinner');
+});
+
+test('a tab-separated copy of the same file reads the same way', () => {
+  const tabbed = DEPOSIT_FILE.replaceAll(',', '\t').replace('"Repayment\t dinner"', 'Repayment dinner');
+  const { rows } = parseBankCsv(tabbed, 'savings');
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].bankBalanceCents, 239755);
+});
+
+test('a credit card download is recognised and read', () => {
+  const { format, rows } = parseBankCsv(CARD_FILE, 'credit_card');
+  assert.equal(format.id, 'chase-card');
+  const [offer, payment, service] = rows;
+  assert.equal(offer.description, 'Offer:Deal Lake Bar & Co.');
+  assert.equal(offer.date, '2026-09-18'); // the transaction date, not the post date
+  assert.equal(offer.amountCents, 475);
+  assert.equal(payment.amountCents, 50000);
+  assert.equal(service.amountCents, -20000);
+  assert.equal(service.bankCategory, 'Automotive');
+  assert.equal(service.bankBalanceCents, null);
+});
+
+test('the wrong kind of file for the account is refused', () => {
+  assert.throws(() => parseBankCsv(CARD_FILE, 'checking'), /credit card download/);
+  assert.throws(() => parseBankCsv(DEPOSIT_FILE, 'credit_card'), /checking\/savings download/);
+  assert.throws(() => parseBankCsv(DEPOSIT_FILE, 'investment'), /doesn't fit/);
+  assert.throws(() => parseBankCsv('Date,Amount\n1/1/26,5', 'checking'), /aren't a format/);
+  assert.throws(() => parseBankCsv('', 'checking'), /empty/);
+});
+
+test('rows that cannot be read are reported by line, and the rest still load', () => {
+  const file = `${DEPOSIT_FILE}\r\nDEBIT,13/45/26,Bad date,-5,DEBIT_CARD,1,,\r\nDEBIT,1/6/26,Bad amount,abc,DEBIT_CARD,1,,`;
+  const { rows, problems } = parseBankCsv(file, 'checking');
+  assert.equal(rows.length, 4);
+  assert.deepEqual(problems, ['line 6: "13/45/26" is not a date', 'line 7: "abc" is not an amount']);
+});
+
+test('fingerprints are the same across downloads but keep identical rows apart', () => {
+  const coffee = '2/3/26,2/3/26,Bean There Coffee,Food & Drink,Sale,-5.75,';
+  const header = 'Transaction Date,Post Date,Description,Category,Type,Amount,Memo';
+  const first = parseBankCsv([header, coffee, coffee].join('\n'), 'credit_card').rows;
+  const again = parseBankCsv([header, coffee, coffee, '2/4/26,2/4/26,Other,,Sale,-1,'].join('\n'), 'credit_card').rows;
+
+  // Two identical coffees on one day are two different rows...
+  assert.notEqual(first[0].fingerprint, first[1].fingerprint);
+  // ...and a later, overlapping download produces the same two fingerprints.
+  assert.equal(again[0].fingerprint, first[0].fingerprint);
+  assert.equal(again[1].fingerprint, first[1].fingerprint);
 });

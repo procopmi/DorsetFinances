@@ -9,6 +9,9 @@ import { byId, getJson, runAction } from '/api.js';
 import * as register from '/register.js';
 import * as categories from '/categories.js';
 import * as payees from '/payees.js';
+// The import preview is part of the Register screen; loading it here
+// connects its "Import CSV…" button.
+import '/import.js';
 
 const screens = {
   register: { section: 'register-view', module: register },

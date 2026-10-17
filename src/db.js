@@ -309,15 +309,72 @@ export function getTransaction(id) {
     .get(id);
 }
 
-function insertTransaction({ accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status }) {
+// bankDescription and importHash are only set for rows imported from a bank
+// file (see importTransactions).
+function insertTransaction({
+  accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status,
+  bankDescription = null, importHash = null,
+}) {
   const result = db
     .prepare(
       `INSERT INTO transactions
-         (account_id, date, amount_cents, payee_id, category_id, memo, check_number, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (account_id, date, amount_cents, payee_id, category_id, memo, check_number, status,
+          bank_description, import_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status);
+    .run(accountId, date, amountCents, payeeId, categoryId, memo, checkNumber, status, bankDescription, importHash);
   return Number(result.lastInsertRowid);
+}
+
+// --- Importing bank downloads ---
+
+// The fingerprints of every row already imported into an account, so a new
+// download can skip the rows it shares with an earlier one.
+export function importedFingerprints(accountId) {
+  const rows = db
+    .prepare('SELECT import_hash FROM transactions WHERE account_id = ? AND import_hash IS NOT NULL')
+    .all(accountId);
+  return new Set(rows.map((r) => r.import_hash));
+}
+
+// The payee with this exact name (ignoring capitals), or undefined.
+export function findPayeeByName(name) {
+  return db.prepare('SELECT id, name, default_category_id FROM payees WHERE name = ?').get(name);
+}
+
+// Adds imported rows to an account, all or nothing: if any row fails, none
+// are added. Each row is { date, amountCents, payeeName, categoryId, memo,
+// checkNumber, bankDescription, fingerprint }. Imported rows are marked
+// cleared, since the bank has already processed them. Returns how many were added.
+export function importTransactions(accountId, rows) {
+  return allOrNothing(() => {
+    for (const row of rows) {
+      const payeeId = row.payeeName ? findOrCreatePayee(row.payeeName) : null;
+      insertTransaction({
+        accountId,
+        date: row.date,
+        amountCents: row.amountCents,
+        payeeId,
+        categoryId: row.categoryId,
+        memo: row.memo,
+        checkNumber: row.checkNumber,
+        status: 'cleared',
+        bankDescription: row.bankDescription,
+        importHash: row.fingerprint,
+      });
+      rememberPayeeCategory(payeeId, row.categoryId);
+    }
+    return rows.length;
+  });
+}
+
+// --- Backups ---
+
+// Writes a complete copy of the open database to `filePath` (which must not
+// exist yet). VACUUM INTO is SQLite's own way of copying a database safely,
+// even while the app has it open.
+export function backupTo(filePath) {
+  db.prepare('VACUUM INTO ?').run(filePath);
 }
 
 // Points two rows at each other as the halves of one transfer, and clears

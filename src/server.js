@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { dbPath, isSampleData, HOST, PORT, publicDir } from './config.js';
 import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
-import { exportRegisterCsv } from './csv.js';
+import { exportRegisterCsv, parseBankCsv } from './csv.js';
+import { makeBackup } from './backup.js';
 
 // --- Input checks ---
 //
@@ -148,6 +149,22 @@ function readTransactionFields(body, ownAccountId, currentOtherAccountId) {
   };
 }
 
+// The account and the parsed bank file for an import request.
+function readImportFile(body) {
+  const account = db.getAccount(requireId(body.accountId));
+  if (!account) throw httpError(404, 'No such account');
+  if (account.is_closed) throw httpError(400, 'This account is closed; reopen it to import into it');
+  if (typeof body.fileText !== 'string') throw httpError(400, 'No file was sent');
+
+  try {
+    return { account, parsed: parseBankCsv(body.fileText, account.type) };
+  } catch (err) {
+    // Problems with the file itself (unknown format, wrong account type) are
+    // the user's to fix, not a server fault.
+    throw httpError(400, err.message);
+  }
+}
+
 function requireTransaction(id) {
   const transaction = db.getTransaction(requireId(id));
   if (!transaction) throw httpError(404, 'No such transaction');
@@ -214,6 +231,70 @@ const apiRoutes = {
       { from, to }
     );
     return new FileDownload(`${label}-${todayText()}.csv`, 'text/csv; charset=utf-8', csv);
+  },
+
+  // --- Importing bank downloads ---
+  //
+  // Two steps. "preview" reads the file and says what would happen, changing
+  // nothing. "commit" reads the same file again, applies your choices from the
+  // preview, makes a backup, and adds the rows. Re-reading the file (rather
+  // than trusting rows sent back by the page) means dates and amounts always
+  // come straight from the bank's file.
+
+  'POST /api/import/preview': (body) => {
+    const { account, parsed } = readImportFile(body);
+    const alreadyImported = db.importedFingerprints(account.id);
+
+    const rows = parsed.rows.map((row) => {
+      // Start the payee as the bank's description; if a payee by that name
+      // already exists, suggest its usual category too.
+      const payee = db.findPayeeByName(row.description);
+      return {
+        ...row,
+        isDuplicate: alreadyImported.has(row.fingerprint),
+        suggestedPayee: payee?.name ?? row.description,
+        suggestedCategoryId: payee?.default_category_id ?? null,
+      };
+    });
+    return { format: parsed.format, problems: parsed.problems, rows };
+  },
+
+  // choices: [{ fingerprint, payee, categoryId }] for the rows you kept ticked.
+  'POST /api/import/commit': (body) => {
+    const { account, parsed } = readImportFile(body);
+    if (!Array.isArray(body.choices)) throw httpError(400, 'No rows chosen');
+
+    const byFingerprint = new Map(parsed.rows.map((row) => [row.fingerprint, row]));
+    const alreadyImported = db.importedFingerprints(account.id);
+    const toImport = [];
+    let skipped = 0;
+
+    for (const choice of body.choices) {
+      const row = byFingerprint.get(choice.fingerprint);
+      if (!row) throw httpError(400, 'The file no longer matches the preview. Please start the import again.');
+      // Checked again here, so importing twice (a double click, or the same
+      // file in two tabs) can't add the rows twice.
+      if (alreadyImported.has(row.fingerprint)) {
+        skipped++;
+        continue;
+      }
+      alreadyImported.add(row.fingerprint);
+      toImport.push({
+        date: row.date,
+        amountCents: row.amountCents,
+        payeeName: optionalText(choice.payee, 'Payee', 100),
+        categoryId: optionalCategoryId(choice.categoryId),
+        memo: row.memo,
+        checkNumber: row.checkNumber,
+        bankDescription: row.description,
+        fingerprint: row.fingerprint,
+      });
+    }
+
+    // Back up before changing anything (project rule: back up before an import).
+    const backupFile = toImport.length > 0 ? makeBackup('import') : null;
+    const imported = db.importTransactions(account.id, toImport);
+    return { imported, skipped, backupFile };
   },
 
   // Set one transaction to uncleared, cleared or reconciled.
@@ -469,9 +550,16 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+// Bank downloads arrive inside the request, so allow a generous size, but
+// not unlimited (a years-long download is well under 5 million characters).
+const MAX_BODY_CHARACTERS = 10_000_000;
+
 async function readJsonBody(req) {
   let text = '';
-  for await (const chunk of req) text += chunk;
+  for await (const chunk of req) {
+    text += chunk;
+    if (text.length > MAX_BODY_CHARACTERS) throw httpError(413, 'That file is too large to import');
+  }
   let body;
   try {
     body = JSON.parse(text);

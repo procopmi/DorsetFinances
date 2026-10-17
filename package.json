@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node scripts/seed-sample.js",
+    "backup": "node scripts/backup.js",
     "test": "node --test"
   }
 }

@@ -88,6 +88,38 @@ body {
   margin: 6px 0 10px;
 }
 
+/* The import preview sits above the register while it's open. */
+.import-panel {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px 12px;
+  margin: 8px 0 16px;
+  background: #fafafa;
+}
+
+.import-panel h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.import-panel input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 1px 4px;
+}
+
+/* A row that will be skipped (already imported, or unticked). */
+.import-panel tr.skipped td {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.import-panel tr.skipped td:first-child,
+.import-panel tr.skipped td:last-child {
+  text-decoration: none;
+}
+
 .category-group {
   margin-bottom: 14px;
 }

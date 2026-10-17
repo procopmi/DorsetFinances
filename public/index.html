@@ -75,12 +75,42 @@
         <!-- Actions for the selected account; hidden when none is selected. -->
         <div id="account-actions" class="account-actions" hidden>
           <button type="button" id="reconcile-cleared" title="Use when the Cleared figure matches your bank">Mark cleared as reconciled</button>
+          <button type="button" id="show-import">Import CSV…</button>
+          <!-- The file picker opened by "Import CSV…"; never shown itself. -->
+          <input type="file" id="import-file" accept=".csv,.txt,text/csv" hidden>
           <button type="button" id="show-export">Export CSV…</button>
           <button type="button" id="rename-account">Rename</button>
           <button type="button" id="toggle-closed">Close account</button>
           <button type="button" id="delete-account" class="danger">Delete</button>
         </div>
       </div>
+      <!-- Import preview (import.js): shown after choosing a bank file. Nothing
+           is saved until "Import" is pressed. -->
+      <section id="import-panel" class="import-panel" hidden>
+        <h3>Import preview</h3>
+        <p id="import-summary"></p>
+        <ul id="import-problems" class="form-error"></ul>
+        <table class="register-grid">
+          <thead>
+            <tr>
+              <th class="col-clr" title="Import this row">Use</th>
+              <th class="col-date">Date</th>
+              <th>Bank description</th>
+              <th class="col-payee">Payee</th>
+              <th class="col-category">Category</th>
+              <th class="col-money">Amount</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody id="import-rows"></tbody>
+        </table>
+        <p id="import-error" class="form-error" hidden></p>
+        <div class="form-buttons">
+          <button type="button" id="commit-import"></button>
+          <button type="button" id="cancel-import">Cancel</button>
+        </div>
+      </section>
+
       <!-- Hidden until "Export CSV…" is clicked. Leave the dates blank for everything. -->
       <form id="export-form" class="inline-form" hidden>
         <select name="scope">
