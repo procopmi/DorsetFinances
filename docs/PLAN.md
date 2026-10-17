@@ -1,0 +1,249 @@
+# Dorset Finances: Plan and Decisions
+
+Last updated 2026-10-17, at commit `23810c2` (end of phase 1).
+
+This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
+
+**How to read the markers:**
+- **No marker:** discussed in chat and approved by you.
+- **(recap)** I decided this while building and reported it in a milestone recap. You approved the commit, but we never discussed it on its own. Worth a second look.
+- **(code)** I inferred this from the current code. It never came up in chat. Please check it.
+
+Sources: this session's chat, the git log, the current code, and the plan file in `~/.claude/plans/`. There's only one plan file there, and each milestone's plan overwrote the one before. It now holds only the milestone 10 plan, so I recovered the earlier versions from the session transcript. Milestones 2–4 and 7–9 were planned in chat, not in that file.
+
+---
+
+## 1. Stack
+
+| Decision | Choice | Why |
+|---|---|---|
+| Runtime | Node.js v24 (LTS), `"engines": ">=24"` | Current LTS on your Mac (v24.22.0, npm 11.19.1 at the start) |
+| SQLite driver | **Built-in `node:sqlite`** (`DatabaseSync`) | No npm packages and no native build. Node's docs don't yet call it "Stable" (it's at release-candidate), which strictly reads against CLAUDE.md's "if it is stable". You approved it anyway. Switching to `better-sqlite3` later would touch only `db.js` |
+| Web server | Plain `node:http` with a small route table. **No Express** | Keeps us at zero dependencies |
+| Modules | ES modules (`import`/`export`) | Current Node standard |
+| Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
+| npm dependencies | **None** | |
+| Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 60 tests at present |
+
+**Safety additions beyond CLAUDE.md:**
+- **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
+- **(recap)** Static files can't be read from outside `public/`.
+- **(recap)** Request bodies are capped at 10 million characters.
+
+## 2. Project structure
+
+```
+package.json          scripts only; no dependencies
+.env.example          FINANCE_DB=/Users/<you>/FinanceData/finance.db  (real .env is gitignored)
+.claude/settings.json deny/ask rules for Claude (committed)
+src/
+  config.js           the one place that decides which database opens (--demo flag vs FINANCE_DB)
+  db.js               THE ONLY FILE THAT TALKS TO SQLITE
+  schema.sql          table definitions
+  money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
+  csv.js              CSV export and bank-file parsing
+  rules.js            payee-rule matching and pattern suggestion
+  default-categories.js  the approved category list as data
+  backup.js           timestamped backups (VACUUM INTO)
+  server.js           routes, input checks, request guard
+public/               index.html, styles.css, main.js (screen switcher), api.js (shared helpers),
+                      register.js, categories.js, payees.js, import.js
+scripts/              seed-sample.js, setup-real.js, backup.js
+test/                 money, balances, transfers, csv, rules, import
+sample-data/          sample.db and backups/ (generated, gitignored)
+```
+
+- **The page never runs SQL.** The browser calls the server, the server calls functions in `db.js`, and only `db.js` touches SQLite. (A grep at milestone 10 confirmed SQL appears only in `db.js` and `schema.sql`.)
+- **Route style (recap):** `'METHOD /path'` → handler. Ids travel in the JSON body; GET routes read query parameters.
+
+## 3. Data location and modes (milestone 10)
+
+- **Real data:** `~/FinanceData/finance.db`, outside the repo. The empty in-project `./FinanceData/` folder was removed at the start.
+- **Backups:** a `backups/` folder next to whichever database is open, so real backups go to `~/FinanceData/backups/`.
+- **`npm start` opens real data** and `npm run start:demo` opens sample data. You asked for this order; my original plan had it the other way round, with `start:real`.
+- **`config.js` refuses to start in real mode if:**
+  - `FINANCE_DB` isn't set,
+  - it isn't a full path,
+  - its folder doesn't exist, or
+  - the file is missing (only `npm run setup` may start without the file).
+- **`npm run setup`** creates the real database with the default categories. It refuses if the file already exists.
+- **Claude's limits** (`.claude/settings.json`):
+  - Claude can't read or edit `~/FinanceData/**` or `./.env`.
+  - Claude can't run `npm start`, `npm run setup` or `npm run backup`.
+  - `rm` needs your approval each time.
+
+## 4. Data model
+
+Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or a badly formed date. Dates are stored as `'YYYY-MM-DD'` text. Foreign keys are on.
+
+| Table | Key points |
+|---|---|
+| `accounts` | `type`: checking / savings / credit_card / investment. Also `opening_balance_cents`, `opening_date`, `is_closed` (hides the account and makes it read-only, keeping its history) and `sort_order` |
+| `categories` | One table, two levels: `parent_id` NULL = group, set = sub. `kind` income/expense, `is_hidden`, `sort_order`, names `UNIQUE(parent_id, name)` |
+| `payees` | `name` unique, ignoring capitals; `default_category_id`; `is_hidden` |
+| `payee_rules` | `match_type` contains / starts_with / exact, `pattern`, `payee_id`. Plain text, no regex |
+| `transactions` | `account_id`, `date`, `payee_id`, `category_id` (NULL = uncategorized), `memo`, `check_number`, signed `amount_cents`, `status`, `transfer_id`, `bank_description`, `import_hash`, `created_at`, `updated_at` |
+
+**Money rules:**
+- `amount_cents` is signed from the account's point of view: **+ means money in, − means money out**.
+- On a credit card a charge is negative, so a **negative card balance means money owed**.
+- **The running balance is never stored.** It's computed on each load from the opening balance, in (date, id) order.
+- **Cleared balance** = opening balance + cleared and reconciled items.
+
+**Categories:**
+- Transactions can only use **sub-categories**. Groups exist for roll-up reports.
+- **(recap)** Hidden categories can still be saved on a transaction, so old rows stay editable. Hiding only removes a category from the suggestions. (The milestone 5 plan said they'd be refused.)
+- Unknown category text is refused, never created automatically. Payees, by contrast, are created as you type.
+
+**Transfers:**
+- Each half's `transfer_id` holds the **other** half's id. (The first plan said both halves would share one value. That changed in milestone 7.)
+- Transfers have no category and will be **left out of spending reports**.
+
+**Splits:** deferred. `category_id` stays on `transactions`. Adding splits later would mean a `transaction_splits` table and a mechanical migration (one split row per transaction). **You asked to be consulted before splits are built.**
+
+## 5. Feature decisions by area
+
+### Register (milestones 3, 4 and 6)
+- **Two amount columns, stored as one signed number.**
+  - Checking and savings show Payment | Deposit.
+  - Credit cards show Charge | Payment.
+  - Investment accounts show Withdrawal | Deposit.
+- **Keyboard entry:**
+  - A blank entry row at the bottom. Tab moves between fields, Enter saves, Esc cancels.
+  - The date starts as the last date you entered.
+  - Shift+Tab reaches the list, where ↑/↓ move, Enter edits, Delete removes (after asking) and Space toggles cleared.
+- **Payee box:**
+  - Suggests existing payees and creates new ones on save.
+  - Picking a payee fills its default category, which is the **last category used with that payee**.
+  - You said: "Payee entering is fine for now."
+- **"Fill last amount" was deliberately left out.**
+- **(recap)** **Rename uses the browser's plain prompt box, and delete uses its confirm box.** Nicer dialogs could come later.
+- **Reconciling: no statement-based reconciliation (your decision).**
+  - Click Clr or press Space to toggle cleared (`c`).
+  - The header shows Balance and Cleared side by side.
+  - **Mark cleared as reconciled** locks every `c` row as `R`.
+  - Editing, deleting or unclearing an `R` row asks first.
+  - The planned statement panel and `reconciliations` table were dropped.
+
+### Categories and payees (milestone 5)
+- **The category list (approved 2026-10-16)** lives in `src/default-categories.js`: 17 groups and 67 subs.
+  - It started at 65 subs. Milestone 9.0 added Other Income: Dividends and Other: Cash.
+  - Groups are by **purpose**, not by how often something is paid. Vendor names are payees, not categories.
+- **Answers to the category questions:**
+  - Utilities: Gas means natural gas for the house; car fuel is Auto: Fuel.
+  - Property tax and homeowners insurance are escrowed in Mortgage, so they have no subs of their own.
+  - Subscriptions has two broad subs; the payee names the service.
+  - Paychecks are recorded as the **net** deposit.
+  - Other Income: Repayments was added for money paid back to you (for example, a Zelle for a shared dinner).
+- **Not categories:**
+  - transfers between your own accounts;
+  - purchase refunds, which go back to the original category.
+- **Management screens:**
+  - Categories: add, rename, hide, move a sub to another group (it takes on the new group's income/expense kind), and delete. Delete works only when nothing uses the category; otherwise hide it.
+  - Payees: rename, hide, set the default category, **merge** (moves transactions and rules, and always asks first), and view or delete import rules.
+- **Payee approach (your question, answered):** a `payees` table for quick entry with default categories, plus `payee_rules` that map bank text to payees at import. **CSV files are never cleaned by hand.**
+
+### Transfers (milestone 7)
+- **Two ways in, and you approved both:**
+  - typing `Transfer: <account>` in Category creates the other half;
+  - **Link…** joins two existing rows with opposite amounts in another account, dated within **7 days**.
+- **What syncs between the halves:**
+  - The amount always stays mirrored.
+  - The date syncs only if both halves had the same date, so linked bank rows keep the bank's dates.
+  - Payee and memo don't sync.
+- **Deleting, unlinking and editing:**
+  - Deleting one half deletes both, after asking.
+  - **Unlink** keeps both rows as ordinary transactions.
+  - Turning a transfer into an ordinary row by editing is refused with "Use Unlink first".
+- **Closed accounts** can't be the target of a new transfer.
+
+### CSV export (milestone 8)
+- **Columns:** Date, Account, Num, Payee, Category Group, Category, Memo, Amount, Status, Balance.
+- **Amounts** are plain numbers like `-1234.56`.
+- **Scope:** one account or all accounts, with an optional From/To range. Balances count history from before the range.
+- **(recap) File details:**
+  - A UTF-8 marker at the start, so Excel shows accented and curly characters correctly.
+  - A formula guard: text starting with `= + - @` gets a leading `'`, so a spreadsheet treats it as text.
+
+### CSV import (milestone 9)
+- **Your bank and file formats:**
+  - **All accounts are at Chase**, for both of you. Two formats are built in and recognised by their header line, so there's no column-mapping screen.
+  - **Checking/savings files** have Posting Date in M/D/YY form, an extra empty column at the end of each row, and the bank's running Balance.
+  - **Card files:** the app uses the **Transaction Date** (your choice), and turns `&amp;`-style codes into the plain characters.
+  - Chase's signs already match ours, so nothing is flipped.
+- **How the import works:**
+  - **Preview first, then commit.** The commit re-reads the file itself, **makes a backup first**, and imports the rows as **cleared**, all-or-nothing.
+  - **Duplicates** are found by a fingerprint per row (the files have no transaction IDs) and skipped.
+- **The bank's own card category** is shown as a hint only (your choice).
+- **Other choices you made:**
+  - Cash withdrawals go to **Other: Cash**.
+  - Fidelity is an **investment** account type that tracks the cash balance only. Dividends are recorded under Other Income: Dividends. Because the money market reinvests at $1 a share, the dividend deposit is the only entry needed. Shares and prices aren't tracked (out of scope).
+- **Milestone 9b additions:**
+  - **Remembered payee rules.** Rules made from the preview are always "contains" rules (recap). When several rules match, the most specific wins: exact, then starts with, then contains, then the longer pattern.
+  - **Linking transfers during import**, offered only when there's exactly one match.
+  - **Matching rows you entered by hand.** The import row must have the same amount and be within **5 days** of an uncleared row you entered by hand that hasn't been imported; a matching check number ranks first. Your row is then marked cleared instead of a duplicate being added.
+  - **Bank-balance check:** after a checking/savings import, the bank's balance is shown next to your cleared balance.
+- **(recap)** The hand-entry match also finds the uncleared half of a transfer you entered yourself.
+- **(recap)** Each existing row can be matched only once per file.
+
+## 6. Milestones
+
+| # | Milestone | Status | Commit |
+|---|---|---|---|
+| 1 | Server skeleton, schema, money helpers, empty register | Done | `a0c082f` |
+| 2 | Accounts, plus the sample seed script | Done | `a2f2b37` |
+| 3 | Read-only register with running balance | Done | `501486e` |
+| 4 | Keyboard entry, editing, payees | Done | `a751c9c` |
+| 5a | Categories in the register | Done | `985b7bf` |
+| 5b | Category and payee management screens | Done | `7f4f30e` |
+| 6 | Cleared status, cleared balance, lock as reconciled | Done | `afc487b` |
+| 7 | Transfers (enter or link) | Done | `f09eafd` |
+| 8 | CSV export | Done | `d2ffe55` |
+| 9.0 | Investment account type, Dividends and Cash categories | Done | `442c63b` |
+| 9a | CSV import with preview, duplicate skipping, backup | Done | `20aa16d` |
+| 9b | Payee rules, transfer linking, hand-entry matching | Done | `e0fc1b6` |
+| 10 | Real-data switch-on (`npm start` = real, `start:demo` = sample) | Done | `23810c2` |
+| — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
+| Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
+| Phase 3 | Reports and dashboard: spending by category | Not started | — |
+
+**Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
+
+## 7. Open questions and pending decisions
+
+1. **Phase 2 budget model.**
+   - CLAUDE.md says to start simple and raise envelope budgeting if it seems worth it.
+   - Still to decide: the basic model, how income categories are handled, and whether unspent budget carries over.
+   - Your old spreadsheet split items into "recurring" and "other". We agreed that idea could come back as a **budget flag**, not as a category.
+2. **How future schema changes reach your real database.**
+   - `schema.sql` uses `CREATE TABLE IF NOT EXISTS`, which adds missing tables but **never changes existing ones**.
+   - In my first milestone 10 proposal I offered a database version number with an "upgrade after backup" step. It wasn't in the plan you approved, so **it wasn't built**.
+   - (code) Nothing records a schema version today (no `user_version`).
+   - The sample database got around this by being rebuilt (as in 9.0). The real one can't be. **This should be settled before phase 2 adds any tables.**
+3. **Split transactions:** deferred. Ask before building them.
+4. **Credit card display.** Balances show as negative and red when money is owed. In milestone 3 I offered to show a positive "amount owed" instead. You never answered, so it's unchanged.
+5. **Rule types in the UI.** Only "contains" rules can be created. The database also supports starts with and exact, but there's no screen for them yet.
+6. **Sample backups.** My test runs left 8 backup files in `sample-data/backups/`. They're gitignored and harmless, and I haven't deleted them, per the "ask first" rule.
+7. **Second user / sharing:** not now, per CLAUDE.md. The data layer stays isolated in `db.js`.
+
+## 8. Small issues noticed while writing this (code)
+
+These are left unfixed, so you can decide.
+- **The rule note in the import preview** (`public/import.js`, the `Rule: contains …` line) always says "contains", even though the server sends the real rule type. It can't be wrong today, because only contains rules can be created, but it would be once other types exist.
+- **`public/styles.css`** has two separate `.app-header { … }` rules one after the other. That's harmless; they could be merged.
+- **`CLAUDE.md`** has an empty `- ` bullet at the end of the "Code style" section.
+
+## 9. Working agreements from chat (not in CLAUDE.md)
+
+- **Commits:**
+  - Work goes on `main`. `.claude/settings.json` is committed, at your request.
+  - You approve each commit by saying "commit".
+  - A larger milestone is split into lettered steps (5a/5b, 9.0/9a/9b), one commit each.
+- **Claude's own safety habits:**
+  - Before starting a server or reseeding, Claude checks whether port 3000 is in use. If you're running a server, Claude doesn't start a second one or reseed under it.
+  - Claude stops only the server it started, by its process id, never every node server. (This came from milestone 5a, when a reseed and a `pkill` disrupted your running server.)
+  - Claude develops only with `--demo`, and tests real mode only against a throwaway database in its scratch folder.
+- **Sample bank data:**
+  - Sample bank rows are pasted into chat with details changed, never saved as real files in the project.
+  - Your pasted rows (anonymised) are the basis of `test/csv.test.js`.
