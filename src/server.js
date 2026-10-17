@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { dbPath, isSampleData, HOST, PORT, publicDir } from './config.js';
 import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
+import { exportRegisterCsv } from './csv.js';
 
 // --- Input checks ---
 //
@@ -186,6 +187,33 @@ const apiRoutes = {
       clearedBalanceCents: clearedBalance(account.opening_balance_cents, rows),
       rows: rows.map((row, i) => ({ ...row, balance_cents: balances[i] })),
     };
+  },
+
+  // Downloads a CSV of one account (?accountId=3) or all accounts
+  // (?accountId=all), optionally limited to ?from=YYYY-MM-DD and/or ?to=...
+  'GET /api/export': (query) => {
+    const from = query.from ? requireDate(query.from) : null;
+    const to = query.to ? requireDate(query.to) : null;
+    if (from && to && from > to) throw httpError(400, 'The From date is after the To date');
+
+    let accounts;
+    let label;
+    if (query.accountId === 'all') {
+      accounts = db.listAccounts();
+      label = 'All-accounts';
+    } else {
+      const account = db.getAccount(requireId(Number(query.accountId)));
+      if (!account) throw httpError(404, 'No such account');
+      accounts = [account];
+      // Keep only letters and digits in the file name, so any account name is safe.
+      label = account.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'Account';
+    }
+
+    const csv = exportRegisterCsv(
+      accounts.map((a) => ({ ...a, rows: db.getRegister(a.id) })),
+      { from, to }
+    );
+    return new FileDownload(`${label}-${todayText()}.csv`, 'text/csv; charset=utf-8', csv);
   },
 
   // Set one transaction to uncleared, cleared or reconciled.
@@ -404,6 +432,23 @@ const apiRoutes = {
 
 // --- Request plumbing ---
 
+// A route returns one of these (instead of plain data) to send a file the
+// browser saves, rather than JSON.
+class FileDownload {
+  constructor(filename, contentType, body) {
+    this.filename = filename;
+    this.contentType = contentType;
+    this.body = body;
+  }
+}
+
+// Today as 'YYYY-MM-DD' in this Mac's time zone, for file names.
+function todayText() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 // The browser decides how to treat a file based on this header, so each file
 // type we serve needs its matching value.
 const contentTypes = {
@@ -496,7 +541,17 @@ async function handleRequest(req, res) {
     try {
       const input =
         req.method === 'POST' ? await readJsonBody(req) : Object.fromEntries(searchParams);
-      sendJson(res, 200, handler(input));
+      const result = handler(input);
+      if (result instanceof FileDownload) {
+        // "attachment" tells the browser to save the file, not display it.
+        res.writeHead(200, {
+          'Content-Type': result.contentType,
+          'Content-Disposition': `attachment; filename="${result.filename}"`,
+        });
+        res.end(result.body);
+      } else {
+        sendJson(res, 200, result);
+      }
     } catch (err) {
       // Expected problems (bad input, missing account) carry a status and just
       // send their message. Anything else is a bug: log it in the terminal.

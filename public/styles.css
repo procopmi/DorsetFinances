@@ -79,8 +79,13 @@ body {
 
 .inline-form {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin: 12px 0 16px;
+}
+
+#export-form {
+  margin: 6px 0 10px;
 }
 
 .category-group {

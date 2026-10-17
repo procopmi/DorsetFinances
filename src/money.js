@@ -55,6 +55,17 @@ export function formatCents(cents) {
   return `${sign}${dollars.toLocaleString('en-US')}.${String(remainder).padStart(2, '0')}`;
 }
 
+// Integer cents as a plain number for files: 123456 -> "1234.56", -5 -> "-0.05".
+// No commas or dollar sign, so spreadsheets read it as a number.
+export function centsToPlainText(cents) {
+  if (!Number.isSafeInteger(cents)) {
+    throw new Error(`centsToPlainText expects whole cents, got ${cents}`);
+  }
+  const sign = cents < 0 ? '-' : '';
+  const absolute = Math.abs(cents);
+  return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
+}
+
 // The balance after each transaction, like the last column of a paper register.
 // Pass the opening balance and the signed amounts already in register order
 // (oldest first); you get back one balance per amount, in the same order.

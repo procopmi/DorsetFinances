@@ -399,6 +399,57 @@ byId('reconcile-cleared').addEventListener('click', () =>
   })
 );
 
+// --- Exporting to CSV ---
+
+const exportForm = byId('export-form');
+
+byId('show-export').addEventListener('click', () => {
+  exportForm.hidden = false;
+  exportForm.elements.scope.focus();
+});
+
+const hideExport = () => {
+  exportForm.hidden = true;
+};
+byId('cancel-export').addEventListener('click', hideExport);
+exportForm.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideExport();
+});
+
+// Asks the server for the file and saves it. fetch (rather than just opening
+// the link) lets a problem, like a From date after the To date, show as a
+// message instead of replacing the page.
+exportForm.addEventListener('submit', (event) => {
+  event.preventDefault(); // we send it ourselves; don't reload the page
+  runAction(async () => {
+    const { scope, from, to } = exportForm.elements;
+    const params = new URLSearchParams({
+      accountId: scope.value === 'all' ? 'all' : String(selectedId),
+      from: from.value,
+      to: to.value,
+    });
+
+    const response = await fetch(`/api/export?${params}`);
+    if (!response.ok) throw new Error((await response.json()).error);
+
+    // The server names the file (e.g. "Everyday-Checking-2026-10-16.csv").
+    const disposition = response.headers.get('Content-Disposition') ?? '';
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'export.csv';
+
+    // Hand the file to the browser's normal download by "clicking" a
+    // temporary link to it.
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    // Free the temporary file a moment later; doing it immediately can cancel
+    // the download in Safari.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    hideExport();
+  });
+});
+
 // --- Entering and editing transactions ---
 
 // New rows start with the last date you entered (handy when typing in a run

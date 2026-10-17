@@ -74,11 +74,23 @@
         <!-- Actions for the selected account; hidden when none is selected. -->
         <div id="account-actions" class="account-actions" hidden>
           <button type="button" id="reconcile-cleared" title="Use when the Cleared figure matches your bank">Mark cleared as reconciled</button>
+          <button type="button" id="show-export">Export CSV…</button>
           <button type="button" id="rename-account">Rename</button>
           <button type="button" id="toggle-closed">Close account</button>
           <button type="button" id="delete-account" class="danger">Delete</button>
         </div>
       </div>
+      <!-- Hidden until "Export CSV…" is clicked. Leave the dates blank for everything. -->
+      <form id="export-form" class="inline-form" hidden>
+        <select name="scope">
+          <option value="account">This account</option>
+          <option value="all">All accounts</option>
+        </select>
+        <label>From <input name="from" type="date"></label>
+        <label>To <input name="to" type="date"></label>
+        <button type="submit">Download CSV</button>
+        <button type="button" id="cancel-export">Cancel</button>
+      </form>
       <table class="register-grid">
         <thead>
           <tr>

@@ -500,6 +500,7 @@ export function getRegister(accountId) {
     .prepare(
       `SELECT t.id, t.date, t.check_number, t.memo, t.amount_cents, t.status,
               p.name AS payee, t.category_id, g.name || ': ' || c.name AS category,
+              g.name AS category_group, c.name AS category_name,
               t.transfer_id, pt.account_id AS transfer_account_id,
               pa.name AS transfer_account, pt.status AS transfer_status
          FROM transactions t
