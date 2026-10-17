@@ -30,9 +30,11 @@ const sampleAccounts = [
   { name: 'Everyday Checking', type: 'checking', openingBalanceCents: 245000, openingDate: '2026-01-01' },
   { name: 'Rainy Day Savings', type: 'savings', openingBalanceCents: 1000000, openingDate: '2026-01-01' },
   { name: 'Sample Visa', type: 'credit_card', openingBalanceCents: -31245, openingDate: '2026-01-01' },
+  // Cash balance only: transfers in and out, plus dividends.
+  { name: 'Sample Fidelity Money Market', type: 'investment', openingBalanceCents: 2000000, openingDate: '2026-01-01' },
 ];
 
-const [checking, savings, visa] = sampleAccounts.map((account) => db.createAccount(account));
+const [checking, savings, visa, fidelity] = sampleAccounts.map((account) => db.createAccount(account));
 
 // The approved category list (src/default-categories.js).
 const categoryIds = addDefaultCategories();
@@ -59,6 +61,13 @@ const sampleTransactions = [
   { accountId: checking, date: '2026-01-25', amountCents: 5000, payeeName: 'Friend via Zelle', category: 'Other Income: Repayments', memo: 'Their half of dinner' },
   { accountId: checking, date: '2026-01-28', amountCents: -6000, payeeName: 'Paws Pet Sitting', category: 'Pets: Pet Sitting', checkNumber: '1002' },
   { accountId: checking, date: '2026-02-01', amountCents: -140000, payeeName: 'Sample Mortgage Co', category: 'Housing: Mortgage', memo: 'February payment', checkNumber: '1003' },
+
+  { accountId: checking, date: '2026-01-14', amountCents: -10000, payeeName: 'Transfer to Fidelity', transferAccountId: fidelity, status: 'cleared' },
+  { accountId: checking, date: '2026-01-29', amountCents: -10000, payeeName: 'ATM', category: 'Other: Cash', status: 'cleared' },
+
+  // Sample Fidelity Money Market: a dividend, reinvested in the fund, so this
+  // deposit is the only entry needed.
+  { accountId: fidelity, date: '2026-01-31', amountCents: 6712, payeeName: 'Fidelity dividend', category: 'Other Income: Dividends' },
 
   // Rainy Day Savings
   { accountId: savings, date: '2026-01-31', amountCents: 412, payeeName: 'Interest', category: 'Other Income: Interest', status: 'cleared' },

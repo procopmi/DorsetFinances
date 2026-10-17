@@ -21,7 +21,7 @@ import { exportRegisterCsv } from './csv.js';
 // The browser checks input too, but the server checks again: it is the last
 // stop before the database, so it must never trust what it's sent.
 
-const ACCOUNT_TYPES = ['checking', 'savings', 'credit_card'];
+const ACCOUNT_TYPES = ['checking', 'savings', 'credit_card', 'investment'];
 
 // An Error carrying an HTTP status code. 400 means "your request was wrong";
 // 404 means "no such thing". Anything without a status is reported as 500,

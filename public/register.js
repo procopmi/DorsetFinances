@@ -79,11 +79,19 @@ function renderRegisterHeader() {
     byId('toggle-closed').textContent = account.is_closed ? 'Reopen account' : 'Close account';
   }
 
-  // On a credit card, money out is a charge and money in is a payment.
-  const isCard = account?.type === 'credit_card';
-  byId('outflow-heading').textContent = isCard ? 'Charge' : 'Payment';
-  byId('inflow-heading').textContent = isCard ? 'Payment' : 'Deposit';
+  // Money-out / money-in column names suited to the kind of account.
+  const headings = COLUMN_HEADINGS[account?.type] ?? COLUMN_HEADINGS.checking;
+  byId('outflow-heading').textContent = headings.outflow;
+  byId('inflow-heading').textContent = headings.inflow;
 }
+
+// On a credit card, money out is a charge and money in is a payment.
+const COLUMN_HEADINGS = {
+  checking: { outflow: 'Payment', inflow: 'Deposit' },
+  savings: { outflow: 'Payment', inflow: 'Deposit' },
+  credit_card: { outflow: 'Charge', inflow: 'Payment' },
+  investment: { outflow: 'Withdrawal', inflow: 'Deposit' },
+};
 
 // --- The register grid ---
 

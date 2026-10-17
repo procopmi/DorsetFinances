@@ -16,7 +16,9 @@ export const defaultCategories = [
   { group: 'Michael Income', kind: 'income', subs: ['Pay', 'Bonus', 'Expense Reimbursement', 'WFH Stipend'] },
   { group: 'Tax Refunds', kind: 'income', subs: ['Federal', 'New Jersey', 'New York'] },
   // Repayments: money paid back to you, e.g. a Zelle for a dinner you covered.
-  { group: 'Other Income', kind: 'income', subs: ['Unemployment', 'Interest', 'Repayments', 'Other'] },
+  // Dividends: e.g. from the Fidelity money market (reinvested, so the
+  // dividend deposit is the only entry needed).
+  { group: 'Other Income', kind: 'income', subs: ['Unemployment', 'Interest', 'Dividends', 'Repayments', 'Other'] },
 
   // --- Expenses ---
   // Mortgage includes escrowed property tax and homeowners insurance.
@@ -51,7 +53,8 @@ export const defaultCategories = [
   { group: 'Banking & Fees', kind: 'expense', subs: ['Credit Card Annual Fees', 'Other Fees'] },
   // Tax you pay; the counterpart to Tax Refunds.
   { group: 'Taxes', kind: 'expense', subs: ['Federal', 'New Jersey', 'New York'] },
-  { group: 'Other', kind: 'expense', subs: ['Gifts', 'Charity', 'Clothing', 'Household Supplies', 'Miscellaneous'] },
+  // Cash: ATM and cash withdrawals, counted as spent when withdrawn.
+  { group: 'Other', kind: 'expense', subs: ['Gifts', 'Charity', 'Clothing', 'Household Supplies', 'Cash', 'Miscellaneous'] },
 ];
 
 // Adds the list above to an open, empty database. sort_order follows the list

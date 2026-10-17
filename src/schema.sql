@@ -7,11 +7,13 @@
 -- would happily store 12.34 in an INTEGER column; STRICT turns that into an
 -- error, which enforces the integer-cents rule at the database level too.
 
--- Bank accounts and credit cards.
+-- Bank accounts and credit cards. 'investment' is an account such as a
+-- Fidelity money market, tracked by its cash balance only (transfers in and
+-- out, dividends); shares, prices and gains are not tracked.
 CREATE TABLE IF NOT EXISTS accounts (
   id                    INTEGER PRIMARY KEY,
   name                  TEXT    NOT NULL,
-  type                  TEXT    NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card')),
+  type                  TEXT    NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card', 'investment')),
   opening_balance_cents INTEGER NOT NULL DEFAULT 0,
   opening_date          TEXT    NOT NULL,            -- 'YYYY-MM-DD'
   is_closed             INTEGER NOT NULL DEFAULT 0,  -- 1 = hidden, history kept
