@@ -8,9 +8,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "seed": "node scripts/seed-sample.js",
-    "backup": "node scripts/backup.js",
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "start:demo": "node src/server.js --demo",
+    "setup": "node --env-file-if-exists=.env scripts/setup-real.js --setup",
+    "seed": "node scripts/seed-sample.js --demo",
+    "backup": "node --env-file-if-exists=.env scripts/backup.js",
+    "backup:demo": "node scripts/backup.js --demo",
     "test": "node --test"
   }
 }

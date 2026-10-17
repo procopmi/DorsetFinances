@@ -3,7 +3,10 @@
     "deny": [
       "Read(~/FinanceData/**)",
       "Edit(~/FinanceData/**)",
-      "Read(./.env)"
+      "Read(./.env)",
+      "Bash(npm start*)",
+      "Bash(npm run setup*)",
+      "Bash(npm run backup)"
     ],
     "ask": [
       "Bash(rm *)"

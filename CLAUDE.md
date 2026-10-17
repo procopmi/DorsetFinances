@@ -117,4 +117,10 @@ A second person may use the app later. Do not build login, multi-user, or sync c
 - No recurring transactions, multi-currency, or investment tracking unless requested.
 
 ## Commands
-(Fill in once the project exists: start the app, run tests, run the backup.)
+- `npm start`: start the app on your real data (path from `FINANCE_DB` in `.env`; see `.env.example`). Open http://127.0.0.1:3000.
+- `npm run start:demo`: start the app on the sample data (yellow banner). Use this for all development.
+- `npm run setup`: one-time creation of the real database with the default categories. Refuses if it already exists.
+- `npm test`: run the automated tests (in-memory databases only).
+- `npm run seed`: rebuild the sample database (stop the server first).
+- `npm run backup` / `npm run backup:demo`: make a timestamped backup of the real / sample database.
+- Claude never runs `npm start`, `npm run setup` or `npm run backup` (denied in `.claude/settings.json`).

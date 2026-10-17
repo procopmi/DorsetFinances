@@ -1,6 +1,7 @@
 // Makes a timestamped backup copy of the database the app uses.
 //
-// Run with: npm run backup
+// Run with: npm run backup        (your real data)
+//      or:  npm run backup:demo   (the sample data)
 // It only reads the database, so it's safe to run while the app is open.
 // The app also makes a backup by itself before every import.
 

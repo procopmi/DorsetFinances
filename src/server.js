@@ -787,6 +787,7 @@ async function handleRequest(req, res) {
 
 // The sample-data folder holds a generated file that git ignores, so it may
 // not exist yet on a fresh checkout. Create it before SQLite tries to write there.
+// (For real data, config.js has already checked that the folder and file exist.)
 mkdirSync(path.dirname(dbPath), { recursive: true });
 db.openDb(dbPath);
 

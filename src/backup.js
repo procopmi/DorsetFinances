@@ -3,8 +3,8 @@
 // The project rule is "back up before risk": before any import or schema
 // change, a copy of the data file is made, so a bad import can be undone by
 // putting the copy back. Backups go in a "backups" folder next to the
-// database file: for now sample-data/backups/, and ~/FinanceData/backups/
-// once the real data is in use. git ignores both.
+// database file: ~/FinanceData/backups/ for real data, sample-data/backups/
+// for the sample data. git ignores both.
 
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
