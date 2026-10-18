@@ -22,6 +22,7 @@ import {
   defaultCategoryLabelForPayee,
   show as reloadRegister,
 } from '/register.js';
+import { RULE_WORDS } from '/payees.js';
 
 let fileText = null;  // the chosen file's contents, sent again on commit
 let accountId = null; // the account the preview was made for
@@ -169,7 +170,7 @@ function buildPreviewRow(row) {
     }
 
     if (row.rule) {
-      note.append(noteLine(`Rule: contains "${row.rule.pattern}"`));
+      note.append(noteLine(`Rule: ${RULE_WORDS[row.rule.matchType]} "${row.rule.pattern}"`));
     } else {
       // Offered once you've changed the payee from the bank's text: save a
       // rule so future imports get this payee automatically.

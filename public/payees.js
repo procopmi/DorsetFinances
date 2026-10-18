@@ -63,7 +63,8 @@ function buildRow(payee) {
 
 // One import rule, e.g. [contains "WEGMANS" ✕]. ✕ deletes it, after asking.
 // Deleting a rule changes no transactions; future imports just stop using it.
-const RULE_WORDS = { contains: 'contains', starts_with: 'starts with', exact: 'is exactly' };
+// Also used by the import preview to describe the rule that matched.
+export const RULE_WORDS ={ contains: 'contains', starts_with: 'starts with', exact: 'is exactly' };
 
 function buildRuleChip(rule) {
   const chip = document.createElement('span');

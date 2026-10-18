@@ -37,9 +37,6 @@ body {
 .app-header {
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
-}
-
-.app-header {
   display: flex;
   align-items: center;
   gap: 24px;

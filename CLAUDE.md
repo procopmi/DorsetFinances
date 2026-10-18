@@ -60,6 +60,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## Plan
+Current plan and milestone status: docs/PLAN.md
+
 # Household Finance App
 
 A personal, local-only finance app for one household: checkbook-style account registers and household budgeting, with reports by category. It runs on the owner's Mac and is used in a browser at localhost.
@@ -84,7 +87,6 @@ The owner has JavaScript experience from ServiceNow (business rules, client scri
 - Write generous "why" comments that explain intent, not just mechanics.
 - Prefer simple and readable over clever. Plain functions and few abstractions.
 - Keep all database access in one isolated module so storage details don't leak into the rest of the app.
-- 
 
 ## Money and data rules
 - **Integer cents everywhere.** Store and calculate amounts as whole cents. Convert to dollars only for display. Never use floating-point for money.

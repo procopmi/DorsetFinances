@@ -229,10 +229,10 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 
 ## 8. Small issues noticed while writing this (code)
 
-These are left unfixed, so you can decide.
-- **The rule note in the import preview** (`public/import.js`, the `Rule: contains …` line) always says "contains", even though the server sends the real rule type. It can't be wrong today, because only contains rules can be created, but it would be once other types exist.
-- **`public/styles.css`** has two separate `.app-header { … }` rules one after the other. That's harmless; they could be merged.
-- **`CLAUDE.md`** has an empty `- ` bullet at the end of the "Code style" section.
+All three are now fixed.
+- **The rule note in the import preview** always said "contains", whatever the rule's type. It now names the real type, using the same wording as the Payees screen.
+- **`public/styles.css`** had two `.app-header` rules one after the other. They're now one.
+- **`CLAUDE.md`** had an empty bullet in "Code style". You removed it.
 
 ## 9. Working agreements from chat (not in CLAUDE.md)
 
