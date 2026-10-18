@@ -228,14 +228,23 @@ export function categoryLabel(categoryId) {
 // Given an amount (the import preview knows it; the register's entry row
 // doesn't yet when the payee is picked), the payee's amount rule wins.
 export function defaultCategoryLabelForPayee(name, amountCents) {
-  const typed = name.trim().toLowerCase();
-  const payee = payees.find((p) => p.name.toLowerCase() === typed);
+  const payee = findPayee(name);
   if (!payee) return '';
-  if (amountCents !== undefined && payee.threshold_cents !== null) {
-    return categoryLabel(categoryForAmount(payee, amountCents));
-  }
-  return categoryLabel(payee.default_category_id);
+  return amountRuleLabelForPayee(name, amountCents) ?? categoryLabel(payee.default_category_id);
 }
+
+// The category the payee's amount rule picks for this amount, as "Group:
+// Sub", or null if the payee has no amount rule (or no amount is given).
+function amountRuleLabelForPayee(name, amountCents) {
+  const payee = findPayee(name);
+  if (!payee || payee.threshold_cents === null || amountCents === undefined) return null;
+  return categoryLabel(categoryForAmount(payee, amountCents));
+}
+
+const findPayee = (name) => {
+  const typed = name.trim().toLowerCase();
+  return payees.find((p) => p.name.toLowerCase() === typed);
+};
 
 // Fills one of the browser's built-in suggestion lists (<datalist>).
 function fillOptions(listId, values) {
@@ -514,19 +523,56 @@ function buildEditorRow(values, statusMark, { onSave, onCancel }) {
   fields.payee.setAttribute('list', 'payee-options');
   fields.category.setAttribute('list', 'category-options');
 
-  // Once a payee is chosen, fill in the category last used with it, unless
-  // you've already typed a category. ("change" fires when you leave the box.)
+  // The category label this row last filled in by itself, if any. The row
+  // only ever replaces a category that is blank or still shows this label,
+  // so a category you typed or picked yourself is never overwritten.
+  let autoFilledLabel = null;
+  const mayAutoFill = () => {
+    const current = fields.category.value.trim();
+    return current === '' || current === autoFilledLabel;
+  };
+  const autoFill = (label) => {
+    fields.category.value = label;
+    autoFilledLabel = label;
+  };
+
+  // The amount typed so far, in cents (the sign doesn't matter to an amount
+  // rule), or undefined while it's blank or half-typed ("1." or "abc").
+  const typedAmountCents = () => {
+    const text = (fields.outflow.value || fields.inflow.value).trim();
+    if (text === '') return undefined;
+    try {
+      return parseDollarsToCents(text);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Once a payee is chosen, fill in the category last used with it (or its
+  // amount rule's choice, if an amount is already there), unless you've
+  // already typed a category. ("change" fires when you leave the box.)
   fields.payee.addEventListener('change', () => {
     if (fields.category.value.trim() !== '') return;
-    fields.category.value = defaultCategoryLabelForPayee(fields.payee.value);
+    autoFill(defaultCategoryLabelForPayee(fields.payee.value, typedAmountCents()));
   });
+
+  // As the amount is typed, a payee with an amount rule ("under $100.00 →
+  // Life - Cindy, otherwise → Life - Michael") switches the category to
+  // match. Typing 140 shows Cindy for "1" and "14", then Michael: it's only
+  // a suggestion until you save.
+  const applyAmountRule = () => {
+    const label = amountRuleLabelForPayee(fields.payee.value, typedAmountCents());
+    if (label !== null && mayAutoFill()) autoFill(label);
+  };
 
   // An amount goes in one column or the other, so typing in one clears the other.
   fields.outflow.addEventListener('input', () => {
     if (fields.outflow.value !== '') fields.inflow.value = '';
+    applyAmountRule();
   });
   fields.inflow.addEventListener('input', () => {
     if (fields.inflow.value !== '') fields.outflow.value = '';
+    applyAmountRule();
   });
 
   const wrap = (input, className) => {

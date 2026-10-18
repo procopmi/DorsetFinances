@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-18, after milestone 12a (schema upgrades). **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
+Last updated 2026-10-18, after milestone 12b. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -148,7 +148,7 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **Import rules** can be edited (kind, text, payee) and added, not just deleted. Each shows how many imported rows it would pick; click the count to list the bank text. A text counts only for the rule that wins it, so a 0 means a rule does nothing. Rule changes affect future imports only.
   - **A filter box** narrows payees by name or rule text.
   - **Merge several at once:** tick payees (or tick all shown), then "Merge into". A "Remember names for imports" tickbox, on by default, saves each merged name as an "is exactly" rule for the kept payee, so the next import doesn't recreate it.
-  - **Amount rule** ("under $X → A, otherwise → B"), for one payee billing two things with the same bank text (your life insurance). Used by the import preview, where it beats the default category. **Not used in register entry**, because the category fills in before the amount is typed. When merging, the kept payee keeps its own amount rule, or takes the first merged one's; others are removed. A category used by an amount rule can't be deleted.
+  - **Amount rule** ("under $X → A, otherwise → B"), for one payee billing two things with the same bank text (your life insurance). Used by the import preview, where it beats the default category, and (since 12b) by register entry: as you type the amount, the category switches to the rule's choice, unless you typed or picked a category yourself. Changing the amount of an old row doesn't change its saved category. When merging, the kept payee keeps its own amount rule, or takes the first merged one's; others are removed. A category used by an amount rule can't be deleted.
 - **Payee approach (your question, answered):** a `payees` table for quick entry with default categories, plus `payee_rules` that map bank text to payees at import. **CSV files are never cleaned by hand.**
 
 ### Transfers (milestone 7)
@@ -216,7 +216,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 11a | Edit, add and review import rules; Payees filter box | Done | `ffcd1b2` |
 | 11b | Merge several ticked payees, remembering their names as rules | Done | `eefaed5` |
 | 11c | Amount rule per payee; backup before a new table is added | Done | `84a15c6` |
-| 12a | Versioned schema upgrades (`user_version` + upgrade steps) | Done | (this commit) |
+| 12a | Versioned schema upgrades (`user_version` + upgrade steps) | Done | `f745df4` |
+| 12b | Amount rule fills the category in register entry | Done | (this commit) |
 | — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
 | Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
