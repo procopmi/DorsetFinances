@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchRule, ruleMatches, suggestPattern } from '../src/rules.js';
+import { matchRule, ruleMatches, suggestPattern, categoryForAmount } from '../src/rules.js';
 
 const rule = (match_type, pattern, payee_name) => ({ match_type, pattern, payee_name });
 
@@ -64,4 +64,13 @@ test('each bank text counts only for the rule that would pick it', () => {
   assert.deepEqual(matches.get(1).map((d) => d.bank_description), ['WEGMANS #93']);
   assert.deepEqual(matches.get(2).map((d) => d.bank_description), ['WEGMANS GAS #4']);
   assert.deepEqual(matches.get(3), []);
+});
+
+test('an amount rule picks the category by the size of the amount', () => {
+  const lifeCo = { threshold_cents: 10000, below_category_id: 'Cindy', otherwise_category_id: 'Michael' };
+  assert.equal(categoryForAmount(lifeCo, -8000), 'Cindy');
+  assert.equal(categoryForAmount(lifeCo, -9999), 'Cindy');     // $99.99 is under $100.00
+  assert.equal(categoryForAmount(lifeCo, -10000), 'Michael');  // $100.00 is not under
+  assert.equal(categoryForAmount(lifeCo, -14000), 'Michael');
+  assert.equal(categoryForAmount(lifeCo, 8000), 'Cindy');      // a refund goes back to the same policy
 });

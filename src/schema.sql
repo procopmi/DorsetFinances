@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS payee_rules (
   payee_id    INTEGER NOT NULL REFERENCES payees(id)
 ) STRICT;
 
+-- For a payee whose bank text is always the same but whose payments belong
+-- to two categories, told apart by size: e.g. a life insurer billing two
+-- policies, "under $100.00 -> Life - Cindy, otherwise -> Life - Michael".
+-- Used during imports. At most one per payee; the size of the amount is
+-- compared, so a refund goes to the same category as the payment.
+-- (Added after phase 1: an existing database gets this table, after a
+-- backup, the next time the app starts; see openDb in db.js.)
+CREATE TABLE IF NOT EXISTS payee_amount_rules (
+  payee_id              INTEGER PRIMARY KEY REFERENCES payees(id),
+  threshold_cents       INTEGER NOT NULL CHECK (threshold_cents > 0),
+  below_category_id     INTEGER NOT NULL REFERENCES categories(id),
+  otherwise_category_id INTEGER NOT NULL REFERENCES categories(id)
+) STRICT;
+
 -- One row per register line. amount_cents is signed from the account's point
 -- of view: positive = money in, negative = money out (on a credit card a charge
 -- is negative). There is no balance column: the running balance is computed

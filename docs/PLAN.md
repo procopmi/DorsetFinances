@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-17, at commit `f06585f`. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
+Last updated 2026-10-18, after milestone 11 (phase 1 follow-ups). **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -83,6 +83,7 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | `categories` | One table, two levels: `parent_id` NULL = group, set = sub. `kind` income/expense, `is_hidden`, `sort_order`, names `UNIQUE(parent_id, name)` |
 | `payees` | `name` unique, ignoring capitals; `default_category_id`; `is_hidden` |
 | `payee_rules` | `match_type` contains / starts_with / exact, `pattern`, `payee_id`. Plain text, no regex |
+| `payee_amount_rules` | (milestone 11c) One per payee: `threshold_cents`, `below_category_id`, `otherwise_category_id`. Under the threshold (by size, sign ignored) → first category, otherwise → second |
 | `transactions` | `account_id`, `date`, `payee_id`, `category_id` (NULL = uncategorized), `memo`, `check_number`, signed `amount_cents`, `status`, `transfer_id`, `bank_description`, `import_hash`, `created_at`, `updated_at` |
 
 **Money rules:**
@@ -142,6 +143,11 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 - **Management screens:**
   - Categories: add, rename, hide, move a sub to another group (it takes on the new group's income/expense kind), and delete. Delete works only when nothing uses the category; otherwise hide it.
   - Payees: rename, hide, set the default category, **merge** (moves transactions and rules, and always asks first), and view or delete import rules.
+- **Milestone 11 additions (Payees screen):**
+  - **Import rules** can be edited (kind, text, payee) and added, not just deleted. Each shows how many imported rows it would pick; click the count to list the bank text. A text counts only for the rule that wins it, so a 0 means a rule does nothing. Rule changes affect future imports only.
+  - **A filter box** narrows payees by name or rule text.
+  - **Merge several at once:** tick payees (or tick all shown), then "Merge into". A "Remember names for imports" tickbox, on by default, saves each merged name as an "is exactly" rule for the kept payee, so the next import doesn't recreate it.
+  - **Amount rule** ("under $X → A, otherwise → B"), for one payee billing two things with the same bank text (your life insurance). Used by the import preview, where it beats the default category. **Not used in register entry**, because the category fills in before the amount is typed. When merging, the kept payee keeps its own amount rule, or takes the first merged one's; others are removed. A category used by an amount rule can't be deleted.
 - **Payee approach (your question, answered):** a `payees` table for quick entry with default categories, plus `payee_rules` that map bank text to payees at import. **CSV files are never cleaned by hand.**
 
 ### Transfers (milestone 7)
@@ -206,6 +212,9 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 10 | Real-data switch-on (`npm start` = real, `start:demo` = sample) | Done | `23810c2` |
 | — | This plan doc | Done | `1c9b2ff` |
 | — | Clean-up: real rule type in the import preview, one `.app-header` CSS rule, CLAUDE.md tidy and pointer to this file | Done | `f06585f` |
+| 11a | Edit, add and review import rules; Payees filter box | Done | `ffcd1b2` |
+| 11b | Merge several ticked payees, remembering their names as rules | Done | `eefaed5` |
+| 11c | Amount rule per payee; backup before a new table is added | Done | (this commit) |
 | — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
 | Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
@@ -236,9 +245,10 @@ Items 1 and 2 block phase 2. Items 3–5 can wait until real use shows whether t
    - In my first milestone 10 proposal I offered a database version number with an "upgrade after backup" step. It wasn't in the plan you approved, so **it wasn't built**.
    - (code) Nothing records a schema version today (no `user_version`).
    - The sample database got around this by being rebuilt (as in 9.0). The real one can't be. **This should be settled before phase 2 adds any tables.**
+   - **Partly covered since milestone 11c:** when `schema.sql` has a table an existing database lacks, `openDb` makes a backup (`-schema.db`) before creating it. Brand-new tables are therefore fine. **Changing an existing table** still has no mechanism.
 3. **Split transactions:** deferred. Ask before building them.
 4. **Credit card display.** Balances show as negative and red when money is owed. In milestone 3 I offered to show a positive "amount owed" instead. You never answered, so it's unchanged.
-5. **Rule types in the UI.** Only "contains" rules can be created. The database also supports starts with and exact, but there's no screen for them yet.
+5. ~~**Rule types in the UI.**~~ Resolved in milestone 11a: the Payees screen can add and edit all three kinds.
 6. **Sample backups.** My test runs left 8 backup files in `sample-data/backups/`. They're gitignored and harmless, and I haven't deleted them, per the "ask first" rule.
 7. **Second user / sharing:** not now, per CLAUDE.md. The data layer stays isolated in `db.js`.
 

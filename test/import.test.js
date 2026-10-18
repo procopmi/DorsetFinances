@@ -148,3 +148,35 @@ test('merging without remembering names adds no rules', () => {
   assert.deepEqual(result, { moved: 1, rulesAdded: 0 });
   assert.deepEqual(db.listPayeeRules(), []);
 });
+
+// Two sub-categories for amount-rule tests (test databases start empty).
+function lifeCategories() {
+  const group = db.createCategory({ name: 'Insurance', kind: 'expense', parentId: null });
+  return ['Life A', 'Life B'].map((name) => db.createCategory({ name, kind: 'expense', parentId: group }));
+}
+
+test('an amount rule moves with a merge, unless the kept payee has its own', () => {
+  db.importTransactions(card, [
+    bankRow('2026-03-01', -8000, 'LIFECO'),
+    bankRow('2026-03-01', -8000, 'LIFECO PREMIUM'),
+    bankRow('2026-03-01', -8000, 'Life Co'),
+  ]);
+  const id = (name) => db.findPayeeByName(name).id;
+  const [a, b] = lifeCategories();
+
+  db.setAmountRule({ payeeId: id('LIFECO'), thresholdCents: 10000, belowCategoryId: a, otherwiseCategoryId: b });
+  db.mergePayees([id('LIFECO')], id('Life Co'));
+  assert.equal(db.getAmountRule(id('Life Co')).threshold_cents, 10000); // moved
+
+  db.setAmountRule({ payeeId: id('LIFECO PREMIUM'), thresholdCents: 5000, belowCategoryId: b, otherwiseCategoryId: a });
+  db.mergePayees([id('LIFECO PREMIUM')], id('Life Co'));
+  assert.equal(db.getAmountRule(id('Life Co')).threshold_cents, 10000); // kept payee's own wins
+  assert.equal(db.listPayeesWithUsage().length, 1);
+});
+
+test('a category used by an amount rule is listed, so deleting it can be refused', () => {
+  db.importTransactions(card, [bankRow('2026-03-01', -8000, 'Life Co')]);
+  const [a, b] = lifeCategories();
+  db.setAmountRule({ payeeId: db.findPayeeByName('Life Co').id, thresholdCents: 10000, belowCategoryId: a, otherwiseCategoryId: b });
+  assert.deepEqual(db.payeesWithAmountRuleUsing(b), ['Life Co']);
+});

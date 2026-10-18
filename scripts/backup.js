@@ -9,5 +9,6 @@ import { dbPath } from '../src/config.js';
 import * as db from '../src/db.js';
 import { makeBackup } from '../src/backup.js';
 
-db.openDb(dbPath);
+// An older database may first get a newly added table; that's backed up first too.
+db.openDb(dbPath, { beforeSchemaChange: () => console.log(`Backup before adding new tables: ${makeBackup('schema')}`) });
 console.log(`Backup saved to ${makeBackup('manual')}`);

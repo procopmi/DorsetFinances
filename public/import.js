@@ -8,7 +8,8 @@
 //        your row is marked cleared instead of a new one being added);
 //      - the other half of a transfer already in another account (ticked:
 //        the two are linked);
-//      - a remembered rule that chose the payee.
+//      - a remembered rule that chose the payee;
+//      - the payee's amount rule, which chose the category by amount.
 //    Rows already imported from an earlier download are marked and skipped.
 // 3. "Import" sends the same file back with your choices. The server makes a
 //    backup, then makes all the changes at once.
@@ -169,6 +170,12 @@ function buildPreviewRow(row) {
       );
     }
 
+    if (row.amountRule) {
+      const threshold = row.amountRule.thresholdCents;
+      const side = Math.abs(row.amountCents) < threshold ? 'under' : 'at least';
+      note.append(noteLine(`Category by amount: ${side} $${formatCents(threshold)}`));
+    }
+
     if (row.rule) {
       note.append(noteLine(`Rule: ${RULE_WORDS[row.rule.matchType]} "${row.rule.pattern}"`));
     } else {
@@ -187,9 +194,10 @@ function buildPreviewRow(row) {
     if (row.bankCategory) note.append(noteLine(`Bank: ${row.bankCategory}`));
   }
 
-  // Choosing a known payee fills in its usual category, as in the register.
+  // Choosing a known payee fills in its usual category, as in the register
+  // (or the category its amount rule gives for this row's amount).
   payee.addEventListener('change', () => {
-    if (category.value.trim() === '') category.value = defaultCategoryLabelForPayee(payee.value);
+    if (category.value.trim() === '') category.value = defaultCategoryLabelForPayee(payee.value, row.amountCents);
   });
   for (const control of [use, payee, entry.handEnteredBox, entry.linkBox]) {
     control?.addEventListener(control === payee ? 'input' : 'change', updateRows);

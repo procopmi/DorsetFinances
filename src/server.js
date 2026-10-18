@@ -16,7 +16,7 @@ import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
 import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
-import { matchRule, ruleMatches, suggestPattern } from './rules.js';
+import { matchRule, ruleMatches, suggestPattern, categoryForAmount } from './rules.js';
 
 // --- Input checks ---
 //
@@ -278,7 +278,9 @@ const apiRoutes = {
 
   // For each row the preview suggests, in this order:
   //   - a payee: from a remembered rule, else a payee named like the bank
-  //     text, else the bank text itself (plus that payee's usual category);
+  //     text, else the bank text itself;
+  //   - a category: from the payee's amount rule if it has one, else the
+  //     payee's usual category;
   //   - a hand-entered row it's the bank's copy of (use that instead), or
   //   - the other half of a transfer already in another account (link it).
   'POST /api/import/preview': (body) => {
@@ -297,6 +299,7 @@ const apiRoutes = {
         suggestedPayee: row.description,
         suggestedCategoryId: null,
         rule: null,
+        amountRule: null,
         handEntered: null,
         transferMatch: null,
         otherTransferMatches: 0,
@@ -306,11 +309,16 @@ const apiRoutes = {
 
       const rule = matchRule(row.description, rules);
       const payee = rule
-        ? { name: rule.payee_name, default_category_id: rule.default_category_id }
+        ? { id: rule.payee_id, name: rule.payee_name, default_category_id: rule.default_category_id }
         : db.findPayeeByName(row.description);
       if (payee) {
         result.suggestedPayee = payee.name;
         result.suggestedCategoryId = payee.default_category_id;
+        const amountRule = db.getAmountRule(payee.id);
+        if (amountRule) {
+          result.suggestedCategoryId = categoryForAmount(amountRule, row.amountCents);
+          result.amountRule = { thresholdCents: amountRule.threshold_cents };
+        }
       }
       if (rule) result.rule = { matchType: rule.match_type, pattern: rule.pattern };
 
@@ -551,6 +559,10 @@ const apiRoutes = {
     if (count > 0) {
       throw httpError(400, `"${category.name}" is used by ${count} transaction(s). Hide it instead.`);
     }
+    const amountRulePayees = db.payeesWithAmountRuleUsing(category.id);
+    if (amountRulePayees.length > 0) {
+      throw httpError(400, `"${category.name}" is used by the amount rule on ${amountRulePayees.map((n) => `"${n}"`).join(', ')}. Change or remove that rule first.`);
+    }
     db.deleteCategory(category.id);
     return { ok: true };
   },
@@ -577,6 +589,25 @@ const apiRoutes = {
 
   'POST /api/payees/set-default-category': (body) => {
     db.setPayeeDefaultCategory(requirePayee(body.id).id, optionalCategoryId(body.categoryId));
+    return { ok: true };
+  },
+
+  // A payee's amount rule: { payeeId, thresholdCents, belowCategoryId,
+  // otherwiseCategoryId }. Amounts under thresholdCents (by size) get the
+  // first category, the rest the second. Replaces any rule the payee had.
+  'POST /api/payees/set-amount-rule': (body) => {
+    const payee = requirePayee(body.payeeId);
+    const thresholdCents = requireCents(body.thresholdCents);
+    if (thresholdCents <= 0) throw httpError(400, 'The amount must be more than zero');
+    const belowCategoryId = optionalCategoryId(body.belowCategoryId);
+    const otherwiseCategoryId = optionalCategoryId(body.otherwiseCategoryId);
+    if (!belowCategoryId || !otherwiseCategoryId) throw httpError(400, 'Choose both categories');
+    db.setAmountRule({ payeeId: payee.id, thresholdCents, belowCategoryId, otherwiseCategoryId });
+    return { ok: true };
+  },
+
+  'POST /api/payees/delete-amount-rule': (body) => {
+    if (!db.deleteAmountRule(requirePayee(body.payeeId).id)) throw httpError(404, 'That payee has no amount rule');
     return { ok: true };
   },
 
@@ -722,9 +753,12 @@ const contentTypes = {
 
 // Files outside public/ that the browser is allowed to load. money.js is
 // shared so the page parses and formats amounts with exactly the same (tested)
-// code as the server. Listing files one by one keeps the rest of src/ private.
+// code as the server; rules.js likewise, so the import preview picks a
+// category by amount the same way. Listing files one by one keeps the rest
+// of src/ private.
 const sharedFiles = {
   '/money.js': fileURLToPath(new URL('./money.js', import.meta.url)),
+  '/rules.js': fileURLToPath(new URL('./rules.js', import.meta.url)),
 };
 
 function sendJson(res, status, data) {
@@ -843,7 +877,8 @@ async function handleRequest(req, res) {
 // not exist yet on a fresh checkout. Create it before SQLite tries to write there.
 // (For real data, config.js has already checked that the folder and file exist.)
 mkdirSync(path.dirname(dbPath), { recursive: true });
-db.openDb(dbPath);
+// If this version of the app adds a table, back up the file before adding it.
+db.openDb(dbPath, { beforeSchemaChange: () => console.log(`Backup before adding new tables: ${makeBackup('schema')}`) });
 
 http.createServer(handleRequest).listen(PORT, HOST, () => {
   console.log(`Database: ${dbPath}${isSampleData ? '  (SAMPLE DATA)' : ''}`);

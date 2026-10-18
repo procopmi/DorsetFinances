@@ -6,6 +6,8 @@
 // The same money.js the server uses (and the tests cover), served at /money.js.
 import { parseDollarsToCents, formatCents } from '/money.js';
 import { byId, getJson, postJson, runAction, makeButton } from '/api.js';
+// rules.js is shared the same way, for picking a category by amount.
+import { categoryForAmount } from '/rules.js';
 
 // --- Page state ---
 // The accounts as last loaded from the server, and which one is selected.
@@ -223,10 +225,16 @@ export function categoryLabel(categoryId) {
 
 // The usual category of the payee with this name, as "Group: Sub", or ''
 // if the payee is new or has no default. (Also used by import.js.)
-export function defaultCategoryLabelForPayee(name) {
+// Given an amount (the import preview knows it; the register's entry row
+// doesn't yet when the payee is picked), the payee's amount rule wins.
+export function defaultCategoryLabelForPayee(name, amountCents) {
   const typed = name.trim().toLowerCase();
   const payee = payees.find((p) => p.name.toLowerCase() === typed);
-  return payee ? categoryLabel(payee.default_category_id) : '';
+  if (!payee) return '';
+  if (amountCents !== undefined && payee.threshold_cents !== null) {
+    return categoryLabel(categoryForAmount(payee, amountCents));
+  }
+  return categoryLabel(payee.default_category_id);
 }
 
 // Fills one of the browser's built-in suggestion lists (<datalist>).

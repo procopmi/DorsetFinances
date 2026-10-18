@@ -8,6 +8,7 @@
 
 import { byId, getJson, postJson, runAction, makeButton } from '/api.js';
 import { buildCategoryChoices } from '/register.js';
+import { parseDollarsToCents, formatCents } from '/money.js';
 
 let payees = [];          // every payee, hidden ones too, with use_count
 let categoryChoices = []; // "Group: Sub" choices for the default-category dropdown
@@ -97,7 +98,7 @@ function buildRow(payee) {
   nameCell.classList.toggle('muted', Boolean(payee.is_hidden));
 
   const categoryCell = document.createElement('td');
-  categoryCell.append(buildCategorySelect(payee));
+  categoryCell.append(buildCategorySelect(payee), buildAmountRule(payee));
 
   const usesCell = document.createElement('td');
   usesCell.className = 'col-money';
@@ -225,16 +226,16 @@ function showActions(cell, payee) {
   );
 }
 
-// The default-category dropdown, grouped by category group. Changing it saves
-// straight away. A hidden category is still listed if it's this payee's
-// current default, so the dropdown always shows the truth.
-function buildCategorySelect(payee) {
+// A category dropdown, grouped by category group, with `currentId` chosen.
+// A hidden category is still listed if it's the current one, so the
+// dropdown always shows the truth.
+function categorySelect(currentId) {
   const select = document.createElement('select');
   select.append(new Option('(none)', ''));
 
   const groups = new Map();
   for (const choice of categoryChoices) {
-    if (choice.isHidden && choice.id !== payee.default_category_id) continue;
+    if (choice.isHidden && choice.id !== currentId) continue;
     if (!groups.has(choice.groupName)) {
       const optgroup = document.createElement('optgroup');
       optgroup.label = choice.groupName;
@@ -243,7 +244,13 @@ function buildCategorySelect(payee) {
     }
     groups.get(choice.groupName).append(new Option(choice.subName, choice.id));
   }
-  select.value = payee.default_category_id ?? '';
+  select.value = currentId ?? '';
+  return select;
+}
+
+// The default-category dropdown. Changing it saves straight away.
+function buildCategorySelect(payee) {
+  const select = categorySelect(payee.default_category_id);
 
   select.addEventListener('change', () =>
     runAction(async () => {
@@ -255,6 +262,82 @@ function buildCategorySelect(payee) {
     })
   );
   return select;
+}
+
+// --- Amount rules ---
+//
+// For a payee whose bank text never changes but whose payments belong to two
+// categories, told apart by size (two life insurance policies from one
+// insurer, say): "under $100.00 → Life - Cindy, otherwise → Life - Michael".
+// Imports use it to choose the category; it overrides the default category.
+// The size of the amount is compared, so a refund goes to the same category.
+
+const subName = (id) => categoryChoices.find((c) => c.id === id)?.subName ?? '?';
+
+// The rule as a line under the default category, with ✎ and ✕; or, if the
+// payee has none, a "+ amount rule" button.
+function buildAmountRule(payee) {
+  const line = document.createElement('div');
+  line.className = 'amount-rule';
+
+  if (payee.threshold_cents === null) {
+    line.append(makeButton('+ amount rule', async () => line.replaceWith(buildAmountRuleForm(payee, line)), 'rule-add'));
+    return line;
+  }
+
+  line.textContent =
+    `Under $${formatCents(payee.threshold_cents)} → ${subName(payee.below_category_id)}, ` +
+    `otherwise → ${subName(payee.otherwise_category_id)} `;
+  line.append(
+    makeButton('✎', async () => line.replaceWith(buildAmountRuleForm(payee, line)), 'rule-delete'),
+    makeButton('✕', async () => {
+      if (!confirm(`Remove the amount rule from "${payee.name}"? Imports will use its default category instead.`)) return;
+      await postJson('/api/payees/delete-amount-rule', { payeeId: payee.id });
+      await show();
+    }, 'rule-delete')
+  );
+  return line;
+}
+
+// "Under $[ ] → [category] otherwise → [category] Save Cancel", in place of
+// `original` until saved or cancelled. Enter saves, Esc cancels.
+function buildAmountRuleForm(payee, original) {
+  const form = document.createElement('div');
+  form.className = 'amount-rule rule-form';
+
+  const threshold = document.createElement('input');
+  threshold.className = 'amount-input';
+  threshold.placeholder = '100.00';
+  if (payee.threshold_cents !== null) threshold.value = formatCents(payee.threshold_cents);
+  const below = categorySelect(payee.below_category_id);
+  const otherwise = categorySelect(payee.otherwise_category_id);
+
+  const save = () =>
+    runAction(async () => {
+      // Dollars typed here become whole cents (money.js); never a decimal number.
+      await postJson('/api/payees/set-amount-rule', {
+        payeeId: payee.id,
+        thresholdCents: parseDollarsToCents(threshold.value),
+        belowCategoryId: below.value === '' ? null : Number(below.value),
+        otherwiseCategoryId: otherwise.value === '' ? null : Number(otherwise.value),
+      });
+      await show();
+    });
+  const cancel = () => form.replaceWith(original);
+
+  form.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      save();
+    } else if (event.key === 'Escape') {
+      cancel();
+    }
+  });
+
+  form.append('Under $', threshold, ' → ', below, ' otherwise → ', otherwise,
+    makeButton('Save', async () => save()), makeButton('Cancel', async () => cancel()));
+  setTimeout(() => threshold.focus()); // once the form is on the page
+  return form;
 }
 
 // --- Actions ---
@@ -339,12 +422,26 @@ async function mergeInto(fromPayees, typedName, rememberNames) {
   const shownNames = from.slice(0, 15).map((p) => `  ${p.name}`);
   if (from.length > 15) shownNames.push(`  …and ${from.length - 15} more`);
   const transactions = from.reduce((sum, p) => sum + p.use_count, 0);
+
+  // A payee has at most one amount rule. The kept payee keeps its own, or
+  // takes the first merged one's if it has none; any others are removed
+  // (db.js mergePayees does the same).
+  const withAmountRule = from.filter((p) => p.threshold_cents !== null);
+  const movingRule = into.threshold_cents === null ? withAmountRule[0] : undefined;
+  const droppedRules = withAmountRule.filter((p) => p !== movingRule);
+  let amountRuleText = '';
+  if (movingRule) amountRuleText += `\nThe amount rule on "${movingRule.name}" will move to "${into.name}".`;
+  if (droppedRules.length) {
+    amountRuleText += `\nThe amount rule on ${droppedRules.map((p) => `"${p.name}"`).join(', ')} will be removed.`;
+  }
+
   const message =
     `Merge ${from.length} payee(s) into "${into.name}"?\n\n${shownNames.join('\n')}\n\n` +
     `${transactions} transaction(s) will move to "${into.name}", and these payees will be deleted.` +
     (rememberNames
       ? `\nEach name will be remembered as an import rule for "${into.name}".`
       : '\nNo import rules will be added for these names.') +
+    amountRuleText +
     '\n\nThis cannot be undone.';
   if (!confirm(message)) return;
 

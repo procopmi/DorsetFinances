@@ -14,7 +14,14 @@ let db;
 
 // Opens (or creates) the database file and makes sure all tables exist.
 // Pass ':memory:' to get a throwaway in-memory database, which is what tests use.
-export function openDb(filePath) {
+//
+// beforeSchemaChange: called (to make a backup) when an existing database is
+// about to get a table it doesn't have yet, i.e. one added to schema.sql
+// after the file was created. Project rule: back up before a schema change.
+// A brand-new, empty file has nothing to back up, so it isn't called then.
+// This only covers new tables; changing an existing table needs more than
+// "CREATE TABLE IF NOT EXISTS" and is still to be decided (docs/PLAN.md §7).
+export function openDb(filePath, { beforeSchemaChange } = {}) {
   db = new DatabaseSync(filePath);
 
   // SQLite ignores REFERENCES rules unless this is switched on per connection.
@@ -23,6 +30,13 @@ export function openDb(filePath) {
   db.exec('PRAGMA foreign_keys = ON;');
 
   const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+  const wanted = [...schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
+  const existing = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name)
+  );
+  if (existing.size > 0 && wanted.some((name) => !existing.has(name))) {
+    beforeSchemaChange?.();
+  }
   db.exec(schema);
 }
 
@@ -207,10 +221,18 @@ export function deleteCategory(id) {
 // --- Payees ---
 
 // Payees for autocomplete, alphabetically, with the category to fill in
-// automatically when one is chosen.
+// automatically when one is chosen, and the payee's amount rule if it has
+// one (threshold_cents etc. are null otherwise).
 export function listPayees() {
   return db
-    .prepare('SELECT id, name, default_category_id FROM payees WHERE is_hidden = 0 ORDER BY name')
+    .prepare(
+      `SELECT p.id, p.name, p.default_category_id,
+              a.threshold_cents, a.below_category_id, a.otherwise_category_id
+         FROM payees p
+         LEFT JOIN payee_amount_rules a ON a.payee_id = p.id
+        WHERE p.is_hidden = 0
+        ORDER BY p.name`
+    )
     .all();
 }
 
@@ -219,9 +241,11 @@ export function listPayees() {
 export function listPayeesWithUsage() {
   return db
     .prepare(
-      `SELECT p.id, p.name, p.default_category_id, p.is_hidden, COUNT(t.id) AS use_count
+      `SELECT p.id, p.name, p.default_category_id, p.is_hidden, COUNT(t.id) AS use_count,
+              a.threshold_cents, a.below_category_id, a.otherwise_category_id
          FROM payees p
          LEFT JOIN transactions t ON t.payee_id = p.id
+         LEFT JOIN payee_amount_rules a ON a.payee_id = p.id
         GROUP BY p.id
         ORDER BY p.name`
     )
@@ -282,6 +306,10 @@ export function mergePayees(fromIds, intoId, { rememberNames = false } = {}) {
             SET default_category_id = (SELECT default_category_id FROM payees WHERE id = ?)
           WHERE id = ? AND default_category_id IS NULL`
       ).run(fromId, intoId);
+      // The kept payee takes the merged one's amount rule only if it has
+      // none of its own; otherwise the merged one's is dropped.
+      db.prepare('UPDATE OR IGNORE payee_amount_rules SET payee_id = ? WHERE payee_id = ?').run(intoId, fromId);
+      db.prepare('DELETE FROM payee_amount_rules WHERE payee_id = ?').run(fromId);
       if (rememberNames) {
         const { name } = db.prepare('SELECT name FROM payees WHERE id = ?').get(fromId);
         addPayeeRule({ matchType: 'exact', pattern: name, payeeId: intoId });
@@ -291,6 +319,44 @@ export function mergePayees(fromIds, intoId, { rememberNames = false } = {}) {
     }
     return { moved, rulesAdded };
   });
+}
+
+// --- Amount rules (one payee, two categories, told apart by amount) ---
+
+// A payee's amount rule, or undefined if it has none.
+export function getAmountRule(payeeId) {
+  return db
+    .prepare(
+      `SELECT payee_id, threshold_cents, below_category_id, otherwise_category_id
+         FROM payee_amount_rules WHERE payee_id = ?`
+    )
+    .get(payeeId);
+}
+
+// Adds a payee's amount rule, or replaces the one it has.
+export function setAmountRule({ payeeId, thresholdCents, belowCategoryId, otherwiseCategoryId }) {
+  db.prepare(
+    `INSERT OR REPLACE INTO payee_amount_rules
+       (payee_id, threshold_cents, below_category_id, otherwise_category_id)
+     VALUES (?, ?, ?, ?)`
+  ).run(payeeId, thresholdCents, belowCategoryId, otherwiseCategoryId);
+}
+
+export function deleteAmountRule(payeeId) {
+  return db.prepare('DELETE FROM payee_amount_rules WHERE payee_id = ?').run(payeeId).changes > 0;
+}
+
+// Names of the payees whose amount rule uses a category, so deleting that
+// category can be refused with a useful message.
+export function payeesWithAmountRuleUsing(categoryId) {
+  return db
+    .prepare(
+      `SELECT p.name FROM payee_amount_rules a JOIN payees p ON p.id = a.payee_id
+        WHERE a.below_category_id = ? OR a.otherwise_category_id = ?
+        ORDER BY p.name`
+    )
+    .all(categoryId, categoryId)
+    .map((row) => row.name);
 }
 
 // Remembers the category most recently used with a payee, so picking that

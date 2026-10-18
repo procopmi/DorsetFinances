@@ -64,6 +64,10 @@ const sampleTransactions = [
 
   { accountId: checking, date: '2026-01-14', amountCents: -10000, payeeName: 'Transfer to Fidelity', transferAccountId: fidelity, status: 'cleared' },
   { accountId: checking, date: '2026-01-29', amountCents: -10000, payeeName: 'ATM', category: 'Other: Cash', status: 'cleared' },
+  // One insurer billing two life policies with the same bank text: the
+  // amount rule below tells them apart (try importing more of these).
+  { accountId: checking, date: '2026-01-15', amountCents: -8000, payeeName: 'Sample Life Co', category: 'Insurance: Life - Cindy', status: 'cleared' },
+  { accountId: checking, date: '2026-01-15', amountCents: -14000, payeeName: 'Sample Life Co', category: 'Insurance: Life - Michael', status: 'cleared' },
 
   // Sample Fidelity Money Market: a dividend, reinvested in the fund, so this
   // deposit is the only entry needed.
@@ -96,6 +100,14 @@ for (const { category, ...transaction } of sampleTransactions) {
 const checkingSide = db.getRegister(checking).find((t) => t.payee === 'Sample Visa');
 const visaSide = db.getRegister(visa).find((t) => t.payee === 'Payment - thank you');
 db.linkTransfer(checkingSide.id, visaSide.id);
+
+// Sample Life Co: under $100.00 is Cindy's policy, otherwise Michael's.
+db.setAmountRule({
+  payeeId: db.findPayeeByName('Sample Life Co').id,
+  thresholdCents: 10000,
+  belowCategoryId: categoryIds.get('Insurance: Life - Cindy'),
+  otherwiseCategoryId: categoryIds.get('Insurance: Life - Michael'),
+});
 
 console.log(
   `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts, ` +

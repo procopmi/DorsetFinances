@@ -48,6 +48,17 @@ export function ruleMatches(rules, descriptions) {
   return byRule;
 }
 
+// The category an amount rule picks for an amount (see payee_amount_rules in
+// schema.sql): under the threshold -> below_category_id, otherwise ->
+// otherwise_category_id. The size of the amount is compared, ignoring its
+// sign, so a refund of a premium goes back to that premium's category.
+// All in whole cents, so $99.99 is 9999 and is "under" a $100.00 threshold.
+export function categoryForAmount(amountRule, amountCents) {
+  return Math.abs(amountCents) < amountRule.threshold_cents
+    ? amountRule.below_category_id
+    : amountRule.otherwise_category_id;
+}
+
 // A starting pattern for a new "contains" rule, from a bank description.
 // Bank text usually puts the name first, then store numbers and the town:
 //   "WEGMANS #93 MANALAPAN NJ"  -> "WEGMANS"

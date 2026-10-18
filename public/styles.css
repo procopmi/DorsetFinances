@@ -489,3 +489,13 @@ button.small {
 button.rule-count {
   text-decoration: underline;
 }
+
+/* Payees screen: a payee's amount rule, under its default category. */
+.amount-rule {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.amount-input {
+  width: 70px;
+}
