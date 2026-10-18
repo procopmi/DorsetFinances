@@ -8,19 +8,21 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 
+import { MIGRATIONS } from './migrations.js';
+
 // One open connection shared by the whole app. SQLite is a single file on disk
 // and this app has one user, so a single connection is all we need.
 let db;
 
-// Opens (or creates) the database file and makes sure all tables exist.
+// The schema version this code expects: the last upgrade step's number.
+export const SCHEMA_VERSION = MIGRATIONS.at(-1).version;
+
+// Opens (or creates) the database file and brings its tables up to date.
 // Pass ':memory:' to get a throwaway in-memory database, which is what tests use.
 //
-// beforeSchemaChange: called (to make a backup) when an existing database is
-// about to get a table it doesn't have yet, i.e. one added to schema.sql
-// after the file was created. Project rule: back up before a schema change.
-// A brand-new, empty file has nothing to back up, so it isn't called then.
-// This only covers new tables; changing an existing table needs more than
-// "CREATE TABLE IF NOT EXISTS" and is still to be decided (docs/PLAN.md §7).
+// beforeSchemaChange: called (to make a backup) just before an existing
+// database is upgraded. Project rule: back up before a schema change.
+// Returns { from, to } versions, which are equal if nothing was upgraded.
 export function openDb(filePath, { beforeSchemaChange } = {}) {
   db = new DatabaseSync(filePath);
 
@@ -29,15 +31,60 @@ export function openDb(filePath, { beforeSchemaChange } = {}) {
   // doesn't exist.
   db.exec('PRAGMA foreign_keys = ON;');
 
-  const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
-  const wanted = [...schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
-  const existing = new Set(
-    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name)
-  );
-  if (existing.size > 0 && wanted.some((name) => !existing.has(name))) {
-    beforeSchemaChange?.();
+  return prepareSchema(db, { beforeSchemaChange });
+}
+
+// Gets a database's tables to the current version (see migrations.js):
+//   - newer than this code knows: refused, unchanged (old code mustn't
+//     write to a database a newer version has changed);
+//   - empty (just created): built from schema.sql and stamped as current;
+//   - older: backed up (beforeSchemaChange), then each missing step is run
+//     in order, each all-or-nothing together with its new version number,
+//     so a failed step leaves the file at the version before it;
+//   - current: left alone.
+// Takes the connection and step list as arguments so tests can try it on
+// their own in-memory databases with made-up steps.
+export function prepareSchema(connection, { migrations = MIGRATIONS, beforeSchemaChange } = {}) {
+  const latest = migrations.at(-1).version;
+  const from = connection.prepare('PRAGMA user_version').get().user_version;
+
+  if (from > latest) {
+    throw new Error(
+      `This database is at schema version ${from}, but this version of the app only knows up to ` +
+        `${latest}. It was probably changed by a newer version of the app. Nothing was changed.`
+    );
   }
-  db.exec(schema);
+
+  const isEmpty = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table'").get() === undefined;
+  if (isEmpty) {
+    const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+    connection.exec('BEGIN');
+    try {
+      connection.exec(schema);
+      connection.exec(`PRAGMA user_version = ${latest}`);
+      connection.exec('COMMIT');
+    } catch (err) {
+      connection.exec('ROLLBACK');
+      throw err;
+    }
+    return { from: latest, to: latest };
+  }
+
+  const steps = migrations.filter((m) => m.version > from);
+  if (steps.length > 0) beforeSchemaChange?.();
+  for (const step of steps) {
+    connection.exec('BEGIN');
+    try {
+      step.up(connection);
+      // user_version is part of the file, so it commits (or rolls back) with the step.
+      connection.exec(`PRAGMA user_version = ${step.version}`);
+      connection.exec('COMMIT');
+    } catch (err) {
+      connection.exec('ROLLBACK');
+      throw new Error(`Upgrading the database to version ${step.version} (${step.about}) failed: ${err.message}`);
+    }
+  }
+  return { from, to: latest };
 }
 
 // --- Accounts ---

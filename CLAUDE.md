@@ -93,10 +93,15 @@ The owner has JavaScript experience from ServiceNow (business rules, client scri
 - **Real data lives outside the project folder** (for example `~/FinanceData/`), at a path set by config or an environment variable. Never commit it. Keep data files, backups, and `.env` in `.gitignore`.
 - **Development and tests use sample data only.** Do not read or modify the real data file during development.
 - **Back up before risk.** Make a timestamped copy of the data file before any import or schema change.
+- **Schema changes:** edit `src/schema.sql` and add an upgrade step in `src/migrations.js` (see the recipe there). The app backs up and upgrades older databases on start.
 - **Confirm before destructive actions.** Deleting accounts or transactions needs an explicit confirmation in the UI, and Claude must ask before running any script that deletes or overwrites data.
 
 ## Testing
-- Automated tests for money math (balances, budget totals) and CSV import parsing only. Use Node's built-in test runner.
+- Automated tests cover three things only, using Node's built-in test runner:
+  - **Money math:** balances, cleared balances, transfers, budget totals.
+  - **CSV import:** parsing bank files, duplicate skipping, matching and payee rules.
+  - **Data safety:** anything that could lose or corrupt data, such as schema upgrades (a fresh database and an upgraded one must have identical tables), all-or-nothing operations (imports, merges) and refusals that protect data.
+- Tests use in-memory databases only, never the real or sample data file.
 - No automated UI tests.
 
 ## Features and phases

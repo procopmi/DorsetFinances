@@ -877,8 +877,12 @@ async function handleRequest(req, res) {
 // not exist yet on a fresh checkout. Create it before SQLite tries to write there.
 // (For real data, config.js has already checked that the folder and file exist.)
 mkdirSync(path.dirname(dbPath), { recursive: true });
-// If this version of the app adds a table, back up the file before adding it.
-db.openDb(dbPath, { beforeSchemaChange: () => console.log(`Backup before adding new tables: ${makeBackup('schema')}`) });
+// If the file was made by an earlier version of the app, it's backed up and
+// upgraded here (see migrations.js).
+const { from, to } = db.openDb(dbPath, {
+  beforeSchemaChange: () => console.log(`Backup before upgrading the database: ${makeBackup('upgrade')}`),
+});
+if (from !== to) console.log(`Upgraded database from version ${from} to ${to}.`);
 
 http.createServer(handleRequest).listen(PORT, HOST, () => {
   console.log(`Database: ${dbPath}${isSampleData ? '  (SAMPLE DATA)' : ''}`);

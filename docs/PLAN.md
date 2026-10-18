@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-18, after milestone 11 (phase 1 follow-ups). **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
+Last updated 2026-10-18, after milestone 12a (schema upgrades). **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -40,7 +40,8 @@ package.json          scripts only; no dependencies
 src/
   config.js           the one place that decides which database opens (--demo flag vs FINANCE_DB)
   db.js               THE ONLY FILE THAT TALKS TO SQLITE
-  schema.sql          table definitions
+  schema.sql          the full, current table definitions (for brand-new databases)
+  migrations.js       upgrade steps for older databases (imported only by db.js)
   money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
   csv.js              CSV export and bank-file parsing
   rules.js            payee-rule matching and pattern suggestion
@@ -214,7 +215,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | — | Clean-up: real rule type in the import preview, one `.app-header` CSS rule, CLAUDE.md tidy and pointer to this file | Done | `f06585f` |
 | 11a | Edit, add and review import rules; Payees filter box | Done | `ffcd1b2` |
 | 11b | Merge several ticked payees, remembering their names as rules | Done | `eefaed5` |
-| 11c | Amount rule per payee; backup before a new table is added | Done | (this commit) |
+| 11c | Amount rule per payee; backup before a new table is added | Done | `84a15c6` |
+| 12a | Versioned schema upgrades (`user_version` + upgrade steps) | Done | (this commit) |
 | — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
 | Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
@@ -240,12 +242,15 @@ Items 1 and 2 block phase 2. Items 3–5 can wait until real use shows whether t
    - CLAUDE.md says to start simple and raise envelope budgeting if it seems worth it.
    - Still to decide: the basic model, how income categories are handled, and whether unspent budget carries over.
    - Your old spreadsheet split items into "recurring" and "other". We agreed that idea could come back as a **budget flag**, not as a category.
-2. **How future schema changes reach your real database.**
-   - `schema.sql` uses `CREATE TABLE IF NOT EXISTS`, which adds missing tables but **never changes existing ones**.
-   - In my first milestone 10 proposal I offered a database version number with an "upgrade after backup" step. It wasn't in the plan you approved, so **it wasn't built**.
-   - (code) Nothing records a schema version today (no `user_version`).
-   - The sample database got around this by being rebuilt (as in 9.0). The real one can't be. **This should be settled before phase 2 adds any tables.**
-   - **Partly covered since milestone 11c:** when `schema.sql` has a table an existing database lacks, `openDb` makes a backup (`-schema.db`) before creating it. Brand-new tables are therefore fine. **Changing an existing table** still has no mechanism.
+2. ~~**How future schema changes reach your real database.**~~ **Settled in milestone 12a:**
+   - Each database file records its schema version in SQLite's `user_version`. Every file made before 12a is at version 0; the current version is 1.
+   - **On opening** (`openDb` → `prepareSchema` in `db.js`):
+     - a file newer than the app is refused, unchanged;
+     - an empty file is built from `schema.sql` and stamped as current;
+     - an older file is **backed up** (`…-upgrade.db`), then each missing step in `src/migrations.js` runs in order, each all-or-nothing with its version number;
+     - a current file is left alone.
+   - This happens automatically on `npm start` (your choice), which prints "Upgraded database from version X to Y".
+   - **The rule for every schema change:** edit `schema.sql` (for new files) **and** add an upgrade step (for existing files). `test/schema.test.js` checks that both give identical tables, starting from `test/fixtures/schema-v0.sql`. `migrations.js` has the recipes (new table, new column, and the copy-and-rename for anything else).
 3. **Split transactions:** deferred. Ask before building them.
 4. **Credit card display.** Balances show as negative and red when money is owed. In milestone 3 I offered to show a positive "amount owed" instead. You never answered, so it's unchanged.
 5. ~~**Rule types in the UI.**~~ Resolved in milestone 11a: the Payees screen can add and edit all three kinds.

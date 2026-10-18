@@ -1,7 +1,7 @@
--- Table definitions for the whole of phase 1.
---
--- "IF NOT EXISTS" makes this safe to run every time the app starts: it creates
--- missing tables and leaves existing ones (and their data) alone.
+-- The complete, current table definitions. Used only to build a brand-new,
+-- empty database (npm run setup, the seed, tests). An existing database is
+-- brought up to date by the upgrade steps in migrations.js instead, so any
+-- change here needs a matching step there (test/schema.test.js checks).
 --
 -- "STRICT" tells SQLite to reject a value of the wrong type. By default SQLite
 -- would happily store 12.34 in an INTEGER column; STRICT turns that into an
@@ -56,8 +56,7 @@ CREATE TABLE IF NOT EXISTS payee_rules (
 -- policies, "under $100.00 -> Life - Cindy, otherwise -> Life - Michael".
 -- Used during imports. At most one per payee; the size of the amount is
 -- compared, so a refund goes to the same category as the payment.
--- (Added after phase 1: an existing database gets this table, after a
--- backup, the next time the app starts; see openDb in db.js.)
+-- (Added after phase 1, as upgrade step 1 in migrations.js.)
 CREATE TABLE IF NOT EXISTS payee_amount_rules (
   payee_id              INTEGER PRIMARY KEY REFERENCES payees(id),
   threshold_cents       INTEGER NOT NULL CHECK (threshold_cents > 0),

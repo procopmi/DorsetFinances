@@ -9,6 +9,9 @@ import { dbPath } from '../src/config.js';
 import * as db from '../src/db.js';
 import { makeBackup } from '../src/backup.js';
 
-// An older database may first get a newly added table; that's backed up first too.
-db.openDb(dbPath, { beforeSchemaChange: () => console.log(`Backup before adding new tables: ${makeBackup('schema')}`) });
+// A file made by an earlier version of the app is upgraded first, after its own backup.
+const { from, to } = db.openDb(dbPath, {
+  beforeSchemaChange: () => console.log(`Backup before upgrading the database: ${makeBackup('upgrade')}`),
+});
+if (from !== to) console.log(`Upgraded database from version ${from} to ${to}.`);
 console.log(`Backup saved to ${makeBackup('manual')}`);
