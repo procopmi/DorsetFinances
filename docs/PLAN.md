@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-17, at commit `23810c2` (end of phase 1).
+Last updated 2026-10-17, at commit `f06585f`. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -204,13 +204,28 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 9a | CSV import with preview, duplicate skipping, backup | Done | `20aa16d` |
 | 9b | Payee rules, transfer linking, hand-entry matching | Done | `e0fc1b6` |
 | 10 | Real-data switch-on (`npm start` = real, `start:demo` = sample) | Done | `23810c2` |
+| — | This plan doc | Done | `1c9b2ff` |
+| — | Clean-up: real rule type in the import preview, one `.app-header` CSS rule, CLAUDE.md tidy and pointer to this file | Done | `f06585f` |
 | — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
 | Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
 
+### What's next
+1. **You: switch on your real data.**
+   - Run `mkdir -p ~/FinanceData`.
+   - Run `cp .env.example .env` and set `FINANCE_DB=/Users/michaelprocopio/FinanceData/finance.db` in it.
+   - Run `npm run setup`, then `npm start`.
+   - Add your accounts with their opening balances, then import your first Chase downloads.
+
+   Using the app on real data before phase 2 will show what's missing (splits, card display, rule types) better than guessing.
+2. **Decide the schema-upgrade approach** (§7, item 2) before phase 2 adds any tables.
+3. **Phase 2 (budget).** It starts with a plan for you to approve, covering the budget model (§7, item 1). Nothing gets built before that.
+
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 
 ## 7. Open questions and pending decisions
+
+Items 1 and 2 block phase 2. Items 3–5 can wait until real use shows whether they matter.
 
 1. **Phase 2 budget model.**
    - CLAUDE.md says to start simple and raise envelope budgeting if it seems worth it.
