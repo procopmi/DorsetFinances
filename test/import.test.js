@@ -8,6 +8,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { runningBalances, clearedBalance } from '../src/money.js';
 import * as db from '../src/db.js';
+import { matchRule } from '../src/rules.js';
 
 let checking;
 let card;
@@ -117,4 +118,33 @@ test('imported rows are cleared and keep the bank text', () => {
   assert.equal(row.status, 'cleared');
   assert.equal(row.payee, 'Wegmans');
   assert.equal(db.importedFingerprints(checking).has('test|2026-02-01|WEGMANS #93|-5421'), true);
+});
+
+test('merging several payees moves all their rows, and can remember their names', () => {
+  db.importTransactions(card, [
+    bankRow('2026-03-01', -2310, 'CORNER MKT #12 FREEHOLD'),
+    bankRow('2026-03-02', -1145, 'CORNER MKT #12 FREEHOLD'),
+    bankRow('2026-03-03', -900, 'CORNER MARKET 0044'),
+    bankRow('2026-03-04', -500, 'Corner Market'),
+  ]);
+  const id = (name) => db.findPayeeByName(name).id;
+  const keep = id('Corner Market');
+
+  const result = db.mergePayees([id('CORNER MKT #12 FREEHOLD'), id('CORNER MARKET 0044')], keep, { rememberNames: true });
+  assert.deepEqual(result, { moved: 3, rulesAdded: 2 });
+
+  // Every row now has the kept payee, and the money is untouched.
+  assert.deepEqual(new Set(db.getRegister(card).map((r) => r.payee)), new Set(['Corner Market']));
+  assert.equal(balanceOf(card), -4855);
+  assert.deepEqual(db.listPayeesWithUsage().map((p) => p.name), ['Corner Market']);
+
+  // The next import with that bank text picks the kept payee.
+  assert.equal(matchRule('CORNER MKT #12 FREEHOLD', db.listPayeeRules()).payee_name, 'Corner Market');
+});
+
+test('merging without remembering names adds no rules', () => {
+  db.importTransactions(card, [bankRow('2026-03-01', -100, 'SHOP A'), bankRow('2026-03-02', -200, 'Shop')]);
+  const result = db.mergePayees([db.findPayeeByName('SHOP A').id], db.findPayeeByName('Shop').id);
+  assert.deepEqual(result, { moved: 1, rulesAdded: 0 });
+  assert.deepEqual(db.listPayeeRules(), []);
 });

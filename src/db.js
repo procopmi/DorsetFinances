@@ -255,25 +255,41 @@ export function setPayeeDefaultCategory(id, categoryId) {
   );
 }
 
-// Folds one payee into another, for near-duplicates like "Corner Mkt" and
-// "Corner Market". Everything that pointed at `fromId` is moved to `intoId`,
-// then `fromId` is deleted. All or nothing: a failure part-way leaves both
-// payees exactly as they were. Returns how many transactions moved.
-export function mergePayees(fromId, intoId) {
+// Folds payees into another, for near-duplicates like "Corner Mkt" and
+// "Corner Market", or the many raw bank names a big import creates
+// ("CORNER MKT #12 FREEHOLD"). Everything that pointed at each of `fromIds`
+// is moved to `intoId`, then those payees are deleted.
+//
+// With rememberNames, each merged payee's name is also saved as an "is
+// exactly" import rule for the kept payee. A payee that came from raw bank
+// text would otherwise be created again by the next import with that text.
+//
+// All or nothing: a failure part-way leaves every payee exactly as it was.
+// Returns { moved, rulesAdded }: transactions moved and rules added.
+export function mergePayees(fromIds, intoId, { rememberNames = false } = {}) {
   return allOrNothing(() => {
-    const moved = db
-      .prepare('UPDATE transactions SET payee_id = ? WHERE payee_id = ?')
-      .run(intoId, fromId).changes;
-    // Import rules (used from milestone 9) should now produce the kept payee.
-    db.prepare('UPDATE payee_rules SET payee_id = ? WHERE payee_id = ?').run(intoId, fromId);
-    // Keep the merged payee's default category only if the kept one has none.
-    db.prepare(
-      `UPDATE payees
-          SET default_category_id = (SELECT default_category_id FROM payees WHERE id = ?)
-        WHERE id = ? AND default_category_id IS NULL`
-    ).run(fromId, intoId);
-    db.prepare('DELETE FROM payees WHERE id = ?').run(fromId);
-    return moved;
+    let moved = 0;
+    let rulesAdded = 0;
+    for (const fromId of fromIds) {
+      moved += db
+        .prepare('UPDATE transactions SET payee_id = ? WHERE payee_id = ?')
+        .run(intoId, fromId).changes;
+      // Import rules should now produce the kept payee.
+      db.prepare('UPDATE payee_rules SET payee_id = ? WHERE payee_id = ?').run(intoId, fromId);
+      // Keep the merged payee's default category only if the kept one has none.
+      db.prepare(
+        `UPDATE payees
+            SET default_category_id = (SELECT default_category_id FROM payees WHERE id = ?)
+          WHERE id = ? AND default_category_id IS NULL`
+      ).run(fromId, intoId);
+      if (rememberNames) {
+        const { name } = db.prepare('SELECT name FROM payees WHERE id = ?').get(fromId);
+        addPayeeRule({ matchType: 'exact', pattern: name, payeeId: intoId });
+        rulesAdded++;
+      }
+      db.prepare('DELETE FROM payees WHERE id = ?').run(fromId);
+    }
+    return { moved, rulesAdded };
   });
 }
 

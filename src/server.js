@@ -580,12 +580,18 @@ const apiRoutes = {
     return { ok: true };
   },
 
-  // The page asks for confirmation before calling this.
+  // { fromIds: [...], intoId, rememberNames }: one payee or several, all
+  // folded into intoId. The page asks for confirmation before calling this.
   'POST /api/payees/merge': (body) => {
-    const from = requirePayee(body.fromId);
     const into = requirePayee(body.intoId);
-    if (from.id === into.id) throw httpError(400, 'Choose a different payee to merge into');
-    return { moved: db.mergePayees(from.id, into.id) };
+    if (!Array.isArray(body.fromIds) || body.fromIds.length === 0) {
+      throw httpError(400, 'Choose at least one payee to merge');
+    }
+    const fromIds = [...new Set(body.fromIds.map((id) => requirePayee(id).id))];
+    if (fromIds.includes(into.id)) {
+      throw httpError(400, `"${into.name}" is the payee being kept, so it can't also be merged`);
+    }
+    return db.mergePayees(fromIds, into.id, { rememberNames: body.rememberNames === true });
   },
 
   'POST /api/transactions': (body) => {

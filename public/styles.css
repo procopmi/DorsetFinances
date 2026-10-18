@@ -205,6 +205,24 @@ body {
   width: 260px;
 }
 
+#merge-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  background: var(--header-bg);
+}
+
+#merge-bar[hidden] {
+  display: none;  /* display: flex above would otherwise override "hidden" */
+}
+
+.remember-names {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .rule-form {
   display: inline-flex;
   gap: 4px;

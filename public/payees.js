@@ -1,9 +1,10 @@
 // The Payees screen: every payee with its default category and how often it's
-// used, plus rename, hide and merge.
+// used, plus rename, hide, merge and import rules.
 //
 // Merge is the important one: manual entry and CSV imports tend to create
 // near-duplicates ("Corner Mkt" vs "Corner Market"), and merging folds one
-// into the other, moving all its transactions.
+// into the other, moving all its transactions. Tick several payees to merge
+// them all at once, e.g. the raw bank names a big import leaves behind.
 
 import { byId, getJson, postJson, runAction, makeButton } from '/api.js';
 import { buildCategoryChoices } from '/register.js';
@@ -13,10 +14,19 @@ let categoryChoices = []; // "Group: Sub" choices for the default-category dropd
 let rules = [];           // import rules (bank text -> payee), shown with their payee
 
 let openMatchesRuleId = null; // the rule whose matched bank text is listed, if any
+const ticked = new Set();     // ids of payees ticked for merging; kept while you filter
 
 // The filter box narrows the list as you type. Its text survives show(), so
 // the list stays filtered after you edit something.
 byId('payee-filter').addEventListener('input', render);
+
+byId('tick-all-shown').addEventListener('change', (event) => {
+  for (const p of shownPayees()) {
+    if (event.target.checked) ticked.add(p.id);
+    else ticked.delete(p.id);
+  }
+  render();
+});
 
 // Called by main.js whenever this screen is shown.
 export async function show() {
@@ -33,19 +43,28 @@ export async function show() {
   const options = payees.map((p) => new Option(p.name));
   byId('merge-payee-options').replaceChildren(...options);
 
+  // Forget ticks on payees that no longer exist (merged away).
+  for (const id of ticked) {
+    if (!payees.some((p) => p.id === id)) ticked.delete(id);
+  }
   render();
 }
 
 // A payee is shown if the filter text is in its name or in one of its rules.
-function render() {
+function shownPayees() {
   const filter = byId('payee-filter').value.trim().toLowerCase();
-  const shown = payees.filter(
+  return payees.filter(
     (p) =>
       p.name.toLowerCase().includes(filter) ||
       rulesFor(p).some((r) => r.pattern.toLowerCase().includes(filter))
   );
+}
+
+function render() {
+  const shown = shownPayees();
   byId('payee-rows').replaceChildren(...shown.flatMap(buildRows));
   byId('no-payees').hidden = payees.length > 0;
+  updateMergeBar(shown);
 }
 
 const rulesFor = (payee) => rules.filter((r) => r.payee_id === payee.id);
@@ -60,6 +79,18 @@ function buildRows(payee) {
 
 function buildRow(payee) {
   const row = document.createElement('tr');
+
+  const tickCell = document.createElement('td');
+  const tick = document.createElement('input');
+  tick.type = 'checkbox';
+  tick.checked = ticked.has(payee.id);
+  tick.title = 'Tick to merge with others';
+  tick.addEventListener('change', () => {
+    if (tick.checked) ticked.add(payee.id);
+    else ticked.delete(payee.id);
+    updateMergeBar(shownPayees());
+  });
+  tickCell.append(tick);
 
   const nameCell = document.createElement('td');
   nameCell.textContent = payee.is_hidden ? `${payee.name} (hidden)` : payee.name;
@@ -81,7 +112,7 @@ function buildRow(payee) {
   actionsCell.className = 'payee-actions';
   showActions(actionsCell, payee);
 
-  row.append(nameCell, categoryCell, usesCell, rulesCell, actionsCell);
+  row.append(tickCell, nameCell, categoryCell, usesCell, rulesCell, actionsCell);
   return row;
 }
 
@@ -164,7 +195,7 @@ function buildMatchesRow(rule) {
   const row = document.createElement('tr');
   row.className = 'rule-matches';
   const cell = document.createElement('td');
-  cell.colSpan = 5;
+  cell.colSpan = 6;
   row.append(cell);
 
   cell.textContent = 'Loading…';
@@ -249,8 +280,9 @@ function showMergeBox(cell, payee) {
   input.setAttribute('list', 'merge-payee-options');
   input.placeholder = 'Payee to keep';
   input.autocomplete = 'off';
+  const { label: rememberLabel, box: remember } = rememberBox();
 
-  const merge = () => runAction(() => mergeInto(payee, input.value));
+  const merge = () => runAction(() => mergeInto([payee], input.value, remember.checked));
   const cancel = () => showActions(cell, payee);
 
   input.addEventListener('keydown', (event) => {
@@ -264,31 +296,107 @@ function showMergeBox(cell, payee) {
 
   cell.replaceChildren(
     input,
+    rememberLabel,
     makeButton('Merge', async () => merge(), 'danger'),
     makeButton('Cancel', async () => cancel())
   );
   input.focus();
 }
 
-// Permanent, so it spells out what will happen and asks first.
-async function mergeInto(from, typedName) {
+// The "Remember these names" tickbox, on by default. A payee made from raw
+// bank text ("CORNER MKT #12 FREEHOLD") would otherwise be created again by
+// the next import that has that text; with this ticked, its name becomes an
+// "is exactly" rule pointing at the payee you keep.
+function rememberBox() {
+  const label = document.createElement('label');
+  label.className = 'remember-names';
+  label.title = 'Each merged name becomes an "is exactly" import rule for the payee you keep';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = true;
+  label.append(box, ' Remember names for imports');
+  return { label, box };
+}
+
+// Merges one or more payees into the one named `typedName`. Permanent, so
+// it spells out what will happen and asks first.
+async function mergeInto(fromPayees, typedName, rememberNames) {
   const wanted = typedName.trim().toLowerCase();
   const into = payees.find((p) => p.name.toLowerCase() === wanted);
   if (!into) {
     alert(`There's no payee named "${typedName.trim()}". Pick one from the suggestions.`);
     return;
   }
-  if (into.id === from.id) {
+  // Ticking the payee you're keeping is an easy slip; leave it out rather
+  // than refuse, since "merge these into one of them" is what was meant.
+  const from = fromPayees.filter((p) => p.id !== into.id);
+  if (from.length === 0) {
     alert('Choose a different payee to merge into.');
     return;
   }
 
+  // List the names, but not hundreds of them: the box would run off the screen.
+  const shownNames = from.slice(0, 15).map((p) => `  ${p.name}`);
+  if (from.length > 15) shownNames.push(`  …and ${from.length - 15} more`);
+  const transactions = from.reduce((sum, p) => sum + p.use_count, 0);
   const message =
-    `Merge "${from.name}" into "${into.name}"?\n\n` +
-    `${from.use_count} transaction(s) will move to "${into.name}", ` +
-    `and "${from.name}" will be deleted.\n\nThis cannot be undone.`;
+    `Merge ${from.length} payee(s) into "${into.name}"?\n\n${shownNames.join('\n')}\n\n` +
+    `${transactions} transaction(s) will move to "${into.name}", and these payees will be deleted.` +
+    (rememberNames
+      ? `\nEach name will be remembered as an import rule for "${into.name}".`
+      : '\nNo import rules will be added for these names.') +
+    '\n\nThis cannot be undone.';
   if (!confirm(message)) return;
 
-  await postJson('/api/payees/merge', { fromId: from.id, intoId: into.id });
+  await postJson('/api/payees/merge', {
+    fromIds: from.map((p) => p.id),
+    intoId: into.id,
+    rememberNames,
+  });
+  for (const p of from) ticked.delete(p.id);
   await show();
+}
+
+// --- Merging the ticked payees (the bar above the table) ---
+
+const mergeTarget = byId('merge-ticked-into');
+const { label: tickedRememberLabel, box: tickedRemember } = rememberBox();
+byId('merge-ticked-remember').replaceWith(tickedRememberLabel);
+
+function mergeTicked() {
+  runAction(() =>
+    mergeInto(
+      payees.filter((p) => ticked.has(p.id)),
+      mergeTarget.value,
+      tickedRemember.checked
+    )
+  );
+}
+
+byId('merge-ticked').addEventListener('click', mergeTicked);
+mergeTarget.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    mergeTicked();
+  }
+});
+byId('clear-ticked').addEventListener('click', () => {
+  ticked.clear();
+  render();
+});
+
+// Shows the bar while anything is ticked, with how many (and how many of
+// those the filter is currently hiding, so a merge holds no surprises).
+function updateMergeBar(shown) {
+  const shownIds = new Set(shown.map((p) => p.id));
+  const hiddenCount = [...ticked].filter((id) => !shownIds.has(id)).length;
+  byId('merge-bar').hidden = ticked.size === 0;
+  byId('merge-ticked-count').textContent =
+    `${ticked.size} ticked` + (hiddenCount ? ` (${hiddenCount} hidden by the filter)` : '');
+
+  // The header box ticks or unticks every payee the filter is showing.
+  const all = byId('tick-all-shown');
+  const tickedShown = shown.filter((p) => ticked.has(p.id)).length;
+  all.checked = shown.length > 0 && tickedShown === shown.length;
+  all.indeterminate = tickedShown > 0 && tickedShown < shown.length;
 }

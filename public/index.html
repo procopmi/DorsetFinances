@@ -181,9 +181,18 @@
       imports only. Click a rule's row count to see the bank text it picks.
     </p>
     <input id="payee-filter" type="search" placeholder="Filter payees and rules" autocomplete="off">
+    <!-- Shown while any payee is ticked (payees.js). -->
+    <div id="merge-bar" hidden>
+      <span id="merge-ticked-count"></span> · Merge into
+      <input id="merge-ticked-into" list="merge-payee-options" placeholder="Payee to keep" autocomplete="off">
+      <span id="merge-ticked-remember"></span>
+      <button type="button" id="merge-ticked" class="danger">Merge</button>
+      <button type="button" id="clear-ticked">Clear ticks</button>
+    </div>
     <table class="simple-table">
       <thead>
         <tr>
+          <th><input type="checkbox" id="tick-all-shown" title="Tick every payee shown"></th>
           <th>Payee</th>
           <th>Default category</th>
           <th class="col-money">Uses</th>
