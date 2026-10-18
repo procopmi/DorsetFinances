@@ -177,7 +177,10 @@
     <p class="muted">
       The default category fills in when you pick the payee in the register.
       Merge folds a duplicate payee into another, moving all of its transactions.
+      Import rules turn bank text into a payee; changing a rule affects future
+      imports only. Click a rule's row count to see the bank text it picks.
     </p>
+    <input id="payee-filter" type="search" placeholder="Filter payees and rules" autocomplete="off">
     <table class="simple-table">
       <thead>
         <tr>

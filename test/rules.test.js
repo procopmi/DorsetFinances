@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchRule, suggestPattern } from '../src/rules.js';
+import { matchRule, ruleMatches, suggestPattern } from '../src/rules.js';
 
 const rule = (match_type, pattern, payee_name) => ({ match_type, pattern, payee_name });
 
@@ -46,4 +46,22 @@ test('suggested patterns drop store numbers and towns', () => {
   assert.equal(suggestPattern('AMAZON MKTPL  ORDER  LONG TEXT'), 'AMAZON MKTPL ORDER');
   // Too little left after cutting: use the whole description.
   assert.equal(suggestPattern('#12 MAIN'), '#12 MAIN');
+});
+
+test('each bank text counts only for the rule that would pick it', () => {
+  const rules = [
+    { id: 1, match_type: 'contains', pattern: 'WEGMANS' },
+    { id: 2, match_type: 'contains', pattern: 'WEGMANS GAS' },
+    { id: 3, match_type: 'exact', pattern: 'Never seen' },
+  ];
+  const descriptions = [
+    { bank_description: 'WEGMANS #93', count: 5 },
+    { bank_description: 'WEGMANS GAS #4', count: 2 },
+    { bank_description: 'SHOPRITE #12', count: 7 },
+  ];
+  const matches = ruleMatches(rules, descriptions);
+  // "WEGMANS GAS #4" goes to the longer rule only, not to both.
+  assert.deepEqual(matches.get(1).map((d) => d.bank_description), ['WEGMANS #93']);
+  assert.deepEqual(matches.get(2).map((d) => d.bank_description), ['WEGMANS GAS #4']);
+  assert.deepEqual(matches.get(3), []);
 });

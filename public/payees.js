@@ -12,6 +12,12 @@ let payees = [];          // every payee, hidden ones too, with use_count
 let categoryChoices = []; // "Group: Sub" choices for the default-category dropdown
 let rules = [];           // import rules (bank text -> payee), shown with their payee
 
+let openMatchesRuleId = null; // the rule whose matched bank text is listed, if any
+
+// The filter box narrows the list as you type. Its text survives show(), so
+// the list stays filtered after you edit something.
+byId('payee-filter').addEventListener('input', render);
+
 // Called by main.js whenever this screen is shown.
 export async function show() {
   const [payeeList, categoryList, ruleList] = await Promise.all([
@@ -30,10 +36,26 @@ export async function show() {
   render();
 }
 
+// A payee is shown if the filter text is in its name or in one of its rules.
 function render() {
-  const rows = payees.map(buildRow);
-  byId('payee-rows').replaceChildren(...rows);
+  const filter = byId('payee-filter').value.trim().toLowerCase();
+  const shown = payees.filter(
+    (p) =>
+      p.name.toLowerCase().includes(filter) ||
+      rulesFor(p).some((r) => r.pattern.toLowerCase().includes(filter))
+  );
+  byId('payee-rows').replaceChildren(...shown.flatMap(buildRows));
   byId('no-payees').hidden = payees.length > 0;
+}
+
+const rulesFor = (payee) => rules.filter((r) => r.payee_id === payee.id);
+
+// The payee's row, plus a second row listing a rule's matches if it's open.
+function buildRows(payee) {
+  const rows = [buildRow(payee)];
+  const openRule = rulesFor(payee).find((r) => r.id === openMatchesRuleId);
+  if (openRule) rows.push(buildMatchesRow(openRule));
+  return rows;
 }
 
 function buildRow(payee) {
@@ -51,7 +73,9 @@ function buildRow(payee) {
   usesCell.textContent = payee.use_count;
 
   const rulesCell = document.createElement('td');
-  rulesCell.append(...rules.filter((r) => r.payee_id === payee.id).map(buildRuleChip));
+  const blankRule = { id: null, match_type: 'contains', pattern: '', payee_name: payee.name };
+  const addButton = makeButton('+ rule', async () => addButton.replaceWith(buildRuleForm(blankRule, addButton)), 'rule-add');
+  rulesCell.append(...rulesFor(payee).map(buildRuleChip), addButton);
 
   const actionsCell = document.createElement('td');
   actionsCell.className = 'payee-actions';
@@ -61,16 +85,25 @@ function buildRow(payee) {
   return row;
 }
 
-// One import rule, e.g. [contains "WEGMANS" ✕]. ✕ deletes it, after asking.
-// Deleting a rule changes no transactions; future imports just stop using it.
-// Also used by the import preview to describe the rule that matched.
+// One import rule, e.g. [contains "WEGMANS" · 42 rows ✎ ✕].
+//   - The row count is how many imported rows this rule would pick; click it
+//     to list their bank text below the payee.
+//   - ✎ edits the rule in place.
+//   - ✕ deletes it, after asking.
+// Changing or deleting a rule changes no transactions; only future imports.
+// RULE_WORDS is also used by the import preview to describe the rule that matched.
 export const RULE_WORDS ={ contains: 'contains', starts_with: 'starts with', exact: 'is exactly' };
 
 function buildRuleChip(rule) {
   const chip = document.createElement('span');
   chip.className = 'tag rule-chip';
-  chip.textContent = `${RULE_WORDS[rule.match_type]} "${rule.pattern}" `;
+  chip.textContent = `${RULE_WORDS[rule.match_type]} "${rule.pattern}" · `;
   chip.append(
+    makeButton(`${rule.match_count} row(s)`, async () => {
+      openMatchesRuleId = openMatchesRuleId === rule.id ? null : rule.id;
+      render();
+    }, 'rule-count'),
+    makeButton('✎', async () => chip.replaceWith(buildRuleForm(rule, chip)), 'rule-delete'),
     makeButton('✕', async () => {
       if (!confirm(`Stop turning bank text that ${RULE_WORDS[rule.match_type]} "${rule.pattern}" into "${rule.payee_name}"?`)) return;
       await postJson('/api/payee-rules/delete', { id: rule.id });
@@ -78,6 +111,78 @@ function buildRuleChip(rule) {
     }, 'rule-delete')
   );
   return chip;
+}
+
+// The form for adding or changing a rule: kind, text, and the payee it
+// produces (so a rule can be pointed at a different payee). It takes the
+// place of `original` (the chip, or the "+ rule" button) until saved or
+// cancelled. Enter saves, Esc cancels.
+function buildRuleForm(rule, original) {
+  const form = document.createElement('span');
+  form.className = 'rule-form';
+
+  const kind = document.createElement('select');
+  for (const [value, words] of Object.entries(RULE_WORDS)) kind.append(new Option(words, value));
+  kind.value = rule.match_type;
+
+  const pattern = document.createElement('input');
+  pattern.value = rule.pattern;
+  pattern.placeholder = 'bank text';
+
+  const payee = document.createElement('input');
+  payee.setAttribute('list', 'merge-payee-options');
+  payee.value = rule.payee_name;
+  payee.autocomplete = 'off';
+
+  const save = () =>
+    runAction(async () => {
+      const fields = { matchType: kind.value, pattern: pattern.value, payeeName: payee.value };
+      if (rule.id === null) await postJson('/api/payee-rules/add', fields);
+      else await postJson('/api/payee-rules/update', { id: rule.id, ...fields });
+      await show();
+    });
+  const cancel = () => form.replaceWith(original);
+
+  form.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      save();
+    } else if (event.key === 'Escape') {
+      cancel();
+    }
+  });
+
+  form.append(kind, pattern, ' → ', payee, makeButton('Save', async () => save()), makeButton('Cancel', async () => cancel()));
+  setTimeout(() => pattern.focus()); // once the form is on the page
+  return form;
+}
+
+// The bank text a rule picks from imported rows, shown under its payee:
+// each distinct text, how many rows have it, and the payee they got. A rule
+// that's too broad shows up here as text that doesn't belong.
+function buildMatchesRow(rule) {
+  const row = document.createElement('tr');
+  row.className = 'rule-matches';
+  const cell = document.createElement('td');
+  cell.colSpan = 5;
+  row.append(cell);
+
+  cell.textContent = 'Loading…';
+  runAction(async () => {
+    const matches = await getJson(`/api/payee-rules/matches?id=${rule.id}`);
+    if (matches.length === 0) {
+      cell.textContent = `No imported rows are picked by ${RULE_WORDS[rule.match_type]} "${rule.pattern}".`;
+      return;
+    }
+    const list = document.createElement('ul');
+    for (const m of matches) {
+      const item = document.createElement('li');
+      item.textContent = `${m.bank_description} · ${m.count} row(s) · now: ${m.payees ?? '(no payee)'}`;
+      list.append(item);
+    }
+    cell.replaceChildren(`${RULE_WORDS[rule.match_type]} "${rule.pattern}" picks:`, list);
+  });
+  return row;
 }
 
 // The normal buttons for a row.

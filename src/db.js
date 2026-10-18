@@ -411,7 +411,7 @@ export function importTransactions(accountId, rows) {
       }
 
       if (row.rule && payeeId) {
-        savePayeeRule({ matchType: 'contains', pattern: row.rule.pattern, payeeId });
+        addPayeeRule({ matchType: 'contains', pattern: row.rule.pattern, payeeId });
         counts.rules++;
       }
     }
@@ -434,10 +434,26 @@ export function listPayeeRules() {
     .all();
 }
 
+// Every distinct bank text among imported rows, with how many rows have it
+// and the payee(s) those rows ended up with. Used to show what each rule
+// matches (see ruleMatches in rules.js).
+export function importedDescriptions() {
+  return db
+    .prepare(
+      `SELECT t.bank_description, COUNT(*) AS count, group_concat(DISTINCT p.name) AS payees
+         FROM transactions t
+         LEFT JOIN payees p ON p.id = t.payee_id
+        WHERE t.bank_description IS NOT NULL
+        GROUP BY t.bank_description
+        ORDER BY t.bank_description`
+    )
+    .all();
+}
+
 // Adds a rule, or, if the same kind of rule with the same pattern already
 // exists (ignoring capitals), points it at this payee instead of making a
 // second, conflicting one.
-function savePayeeRule({ matchType, pattern, payeeId }) {
+export function addPayeeRule({ matchType, pattern, payeeId }) {
   const existing = db
     .prepare('SELECT id FROM payee_rules WHERE match_type = ? AND pattern = ? COLLATE NOCASE')
     .get(matchType, pattern);
@@ -450,6 +466,25 @@ function savePayeeRule({ matchType, pattern, payeeId }) {
       payeeId
     );
   }
+}
+
+// True if a different rule already has this kind and pattern (ignoring
+// capitals). Two such rules would fight over the same bank text.
+export function payeeRuleTaken({ matchType, pattern }, exceptId = null) {
+  const row = db
+    .prepare('SELECT id FROM payee_rules WHERE match_type = ? AND pattern = ? COLLATE NOCASE AND id IS NOT ?')
+    .get(matchType, pattern, exceptId);
+  return row !== undefined;
+}
+
+// Changes a rule. It affects future imports only; transactions already
+// imported keep their payee.
+export function updatePayeeRule({ id, matchType, pattern, payeeId }) {
+  return (
+    db
+      .prepare('UPDATE payee_rules SET match_type = ?, pattern = ?, payee_id = ? WHERE id = ?')
+      .run(matchType, pattern, payeeId, id).changes > 0
+  );
 }
 
 export function deletePayeeRule(id) {

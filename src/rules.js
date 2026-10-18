@@ -33,6 +33,21 @@ export function matchRule(description, rules) {
   return best;
 }
 
+// Which bank texts each rule would pick, for reviewing rules after an import.
+// `descriptions` is a list of { bank_description, count } (imported rows,
+// grouped by their bank text). Each text goes to the rule matchRule picks for
+// it, so a rule that always loses to a more specific one gets nothing; that
+// is worth seeing, because such a rule is doing no work.
+// Returns a Map: rule id -> the descriptions that rule picks.
+export function ruleMatches(rules, descriptions) {
+  const byRule = new Map(rules.map((rule) => [rule.id, []]));
+  for (const description of descriptions) {
+    const rule = matchRule(description.bank_description, rules);
+    if (rule) byRule.get(rule.id).push(description);
+  }
+  return byRule;
+}
+
 // A starting pattern for a new "contains" rule, from a bank description.
 // Bank text usually puts the name first, then store numbers and the town:
 //   "WEGMANS #93 MANALAPAN NJ"  -> "WEGMANS"

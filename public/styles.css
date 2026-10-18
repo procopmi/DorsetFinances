@@ -198,6 +198,30 @@ body {
   margin: 1px 4px 1px 0;
 }
 
+/* Payees screen: the filter box, the rule edit form and the list of bank
+   text a rule picks. */
+#payee-filter {
+  margin-bottom: 8px;
+  width: 260px;
+}
+
+.rule-form {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.rule-matches td {
+  background: var(--header-bg);
+  font-size: 12px;
+}
+
+.rule-matches ul {
+  margin: 4px 0 0;
+}
+
+button.rule-count,
+button.rule-add,
 button.rule-delete {
   border: none;
   background: none;
@@ -442,4 +466,8 @@ button.small {
   color: var(--muted);
   text-align: center;
   padding: 12px;
+}
+
+button.rule-count {
+  text-decoration: underline;
 }

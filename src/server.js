@@ -16,7 +16,7 @@ import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
 import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
-import { matchRule, suggestPattern } from './rules.js';
+import { matchRule, ruleMatches, suggestPattern } from './rules.js';
 
 // --- Input checks ---
 //
@@ -110,6 +110,20 @@ function requirePayee(id) {
   const payee = db.getPayee(requireId(id));
   if (!payee) throw httpError(404, 'No such payee');
   return payee;
+}
+
+const RULE_TYPES = ['contains', 'starts_with', 'exact'];
+
+// The fields of an import rule, checked. The payee must already exist: a
+// typo here would otherwise quietly create a new payee.
+function readRuleFields(body) {
+  if (!RULE_TYPES.includes(body.matchType)) throw httpError(400, 'Unknown kind of rule');
+  const pattern = optionalText(body.pattern, 'Rule text', 100);
+  if (!pattern) throw httpError(400, 'The rule needs some text to look for');
+  const payeeName = optionalText(body.payeeName, 'Payee', 100);
+  const payee = payeeName && db.findPayeeByName(payeeName);
+  if (!payee) throw httpError(400, `There's no payee named "${payeeName ?? ''}". Pick one from the suggestions.`);
+  return { matchType: body.matchType, pattern, payeeId: payee.id };
 }
 
 function requireCategoryNameFree(name, parentId, exceptId) {
@@ -418,7 +432,41 @@ const apiRoutes = {
 
   // --- Payee rules (listed and deleted on the Payees screen) ---
 
-  'GET /api/payee-rules': () => db.listPayeeRules(),
+  // Each rule comes with match_count: how many imported rows it would pick,
+  // so a rule that's too broad (or doing nothing) stands out.
+  'GET /api/payee-rules': () => {
+    const rules = db.listPayeeRules();
+    const matches = ruleMatches(rules, db.importedDescriptions());
+    return rules.map((rule) => ({
+      ...rule,
+      match_count: matches.get(rule.id).reduce((sum, d) => sum + d.count, 0),
+    }));
+  },
+
+  // The bank texts one rule picks, with their row counts and current payees.
+  'GET /api/payee-rules/matches': (query) => {
+    const id = requireId(Number(query.id));
+    const rules = db.listPayeeRules();
+    if (!rules.some((r) => r.id === id)) throw httpError(404, 'No such rule');
+    return ruleMatches(rules, db.importedDescriptions()).get(id);
+  },
+
+  // Adding and changing rules: { matchType, pattern, payeeName }, plus { id }
+  // to change one. These affect future imports only.
+  'POST /api/payee-rules/add': (body) => {
+    const rule = readRuleFields(body);
+    if (db.payeeRuleTaken(rule)) throw httpError(400, 'There is already a rule like that');
+    db.addPayeeRule(rule);
+    return { ok: true };
+  },
+
+  'POST /api/payee-rules/update': (body) => {
+    const id = requireId(body.id);
+    const rule = readRuleFields(body);
+    if (db.payeeRuleTaken(rule, id)) throw httpError(400, 'There is already a rule like that');
+    if (!db.updatePayeeRule({ id, ...rule })) throw httpError(404, 'No such rule');
+    return { ok: true };
+  },
 
   'POST /api/payee-rules/delete': (body) => {
     if (!db.deletePayeeRule(requireId(body.id))) throw httpError(404, 'No such rule');
