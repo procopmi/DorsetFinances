@@ -497,3 +497,106 @@ function updateMergeBar(shown) {
   all.checked = shown.length > 0 && tickedShown === shown.length;
   all.indeterminate = tickedShown > 0 && tickedShown < shown.length;
 }
+
+// --- Applying rules to rows already imported ---
+//
+// Rows imported before your rules were set up stay uncategorized, and
+// re-importing the bank file won't help: the import skips every row it has
+// seen before. This runs today's rules on the bank text saved with each
+// imported row instead. Only rows with no category are offered, so nothing
+// you categorized yourself is touched. The server makes a backup first.
+
+let reapplyRows = []; // one entry per preview row: the server's row and its tickbox
+
+const categoryText = (id) => categoryChoices.find((c) => c.id === id)?.label ?? '';
+const STATUS_MARKS = { uncleared: '', cleared: 'c', reconciled: 'R' }; // as in the register
+
+byId('show-reapply').addEventListener('click', () => runAction(showReapply));
+byId('cancel-reapply').addEventListener('click', () => {
+  byId('reapply-panel').hidden = true;
+});
+byId('commit-reapply').addEventListener('click', () => runAction(commitReapply));
+byId('reapply-tick-all').addEventListener('change', (event) => {
+  for (const r of reapplyRows) r.box.checked = event.target.checked;
+  updateReapply();
+});
+
+async function showReapply() {
+  const preview = await getJson('/api/reapply-rules/preview');
+  const parts = [`${preview.rows.length} uncategorized imported row(s) can be filled in by your rules`];
+  if (preview.unchanged) parts.push(`${preview.unchanged} more have no rule or usual category yet`);
+  byId('reapply-summary').textContent =
+    `${parts.join('; ')}. Untick any you want to leave as they are.`;
+
+  reapplyRows = preview.rows.map(buildReapplyRow);
+  byId('reapply-rows').replaceChildren(...reapplyRows.map((r) => r.tr));
+  updateReapply();
+  byId('reapply-panel').hidden = false;
+}
+
+function buildReapplyRow(row) {
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = true;
+  box.addEventListener('change', updateReapply);
+
+  const cell = (text, className) => {
+    const td = document.createElement('td');
+    td.textContent = text ?? '';
+    if (className) td.className = className;
+    return td;
+  };
+
+  // "old → new" when the rule changes the payee, else just the payee.
+  const payeeText = row.newPayeeId === row.payee_id ? row.newPayee : `${row.payee ?? '(none)'} → ${row.newPayee}`;
+  const payeeCell = cell(payeeText, 'col-payee');
+  if (row.rule) payeeCell.title = `Import rule: ${RULE_WORDS[row.rule.matchType]} "${row.rule.pattern}"`;
+
+  const tr = document.createElement('tr');
+  const tickCell = cell('', 'col-clr');
+  tickCell.append(box);
+  tr.append(
+    tickCell,
+    cell(row.date, 'col-date'),
+    cell(row.account),
+    cell(row.bank_description),
+    payeeCell,
+    cell(categoryText(row.newCategoryId) || '(stays uncategorized)', 'col-category'),
+    cell(formatCents(row.amount_cents), 'col-money'),
+    cell(STATUS_MARKS[row.status], 'col-clr')
+  );
+  return { row, box, tr };
+}
+
+// Greys out unticked rows and keeps the button and header box in step.
+function updateReapply() {
+  const tickedCount = reapplyRows.filter((r) => r.box.checked).length;
+  for (const r of reapplyRows) r.tr.classList.toggle('skipped', !r.box.checked);
+
+  const button = byId('commit-reapply');
+  button.textContent = `Update ${tickedCount} row(s)`;
+  button.disabled = tickedCount === 0;
+
+  const all = byId('reapply-tick-all');
+  all.checked = reapplyRows.length > 0 && tickedCount === reapplyRows.length;
+  all.indeterminate = tickedCount > 0 && tickedCount < reapplyRows.length;
+}
+
+async function commitReapply() {
+  const ticked = reapplyRows.filter((r) => r.box.checked);
+  const reconciled = ticked.filter((r) => r.row.status === 'reconciled').length;
+  const message =
+    `Set the payee and category on ${ticked.length} row(s)?` +
+    (reconciled ? `\n\n${reconciled} of them are reconciled (R).` : '') +
+    '\n\nA backup is made first.';
+  if (!confirm(message)) return;
+
+  const result = await postJson('/api/reapply-rules/commit', { ids: ticked.map((r) => r.row.id) });
+  byId('reapply-panel').hidden = true;
+  alert(
+    `Updated ${result.updated} row(s).` +
+      (result.skipped ? ` ${result.skipped} skipped (changed since the preview).` : '') +
+      (result.backupFile ? `\n\nBackup saved to ${result.backupFile}` : '')
+  );
+  await show(); // payee use counts have changed
+}

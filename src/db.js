@@ -579,6 +579,47 @@ export function importedDescriptions() {
     .all();
 }
 
+// --- Re-applying rules to rows already imported ---
+
+// Imported rows that still have no category, for re-applying today's rules
+// to their saved bank text (see proposeRuleResults in rules.js). Left out:
+// transfers (no category on purpose) and rows in closed accounts (read-only).
+export function uncategorizedImportedRows() {
+  return db
+    .prepare(
+      `SELECT t.id, a.name AS account, t.date, t.amount_cents, t.status, t.bank_description,
+              t.payee_id, p.name AS payee, p.default_category_id AS payee_default_category_id
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+        WHERE t.bank_description IS NOT NULL AND t.category_id IS NULL
+          AND t.transfer_id IS NULL AND a.is_closed = 0
+        ORDER BY a.name, t.date, t.id`
+    )
+    .all();
+}
+
+// Sets the payee and category of several rows, all or nothing. Each change is
+// { id, payeeId, categoryId }. The WHERE repeats "uncategorized, not a
+// transfer", so a row you categorized after the preview is left alone
+// rather than overwritten. Returns how many rows changed.
+//
+// The payee's remembered category isn't updated (as saving a transaction
+// does), because these categories came from the payee in the first place.
+export function applyRuleResults(changes) {
+  return allOrNothing(() => {
+    const update = db.prepare(
+      `UPDATE transactions SET payee_id = ?, category_id = ?, updated_at = datetime('now')
+        WHERE id = ? AND category_id IS NULL AND transfer_id IS NULL`
+    );
+    let updated = 0;
+    for (const change of changes) {
+      updated += update.run(change.payeeId, change.categoryId, change.id).changes;
+    }
+    return updated;
+  });
+}
+
 // Adds a rule, or, if the same kind of rule with the same pattern already
 // exists (ignoring capitals), points it at this payee instead of making a
 // second, conflicting one.

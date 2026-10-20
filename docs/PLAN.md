@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-18, after milestone 12b. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
+Last updated 2026-10-19, after milestone 13. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 60 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 79 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -149,6 +149,13 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **A filter box** narrows payees by name or rule text.
   - **Merge several at once:** tick payees (or tick all shown), then "Merge into". A "Remember names for imports" tickbox, on by default, saves each merged name as an "is exactly" rule for the kept payee, so the next import doesn't recreate it.
   - **Amount rule** ("under $X → A, otherwise → B"), for one payee billing two things with the same bank text (your life insurance). Used by the import preview, where it beats the default category, and (since 12b) by register entry: as you type the amount, the category switches to the rule's choice, unless you typed or picked a category yourself. Changing the amount of an old row doesn't change its saved category. When merging, the kept payee keeps its own amount rule, or takes the first merged one's; others are removed. A category used by an amount rule can't be deleted.
+- **Milestone 13: apply rules to rows already imported.**
+  - Re-importing a file can't fix early imports, because every row is already imported and is skipped as a duplicate.
+  - Instead, "Apply rules to uncategorized rows…" on the Payees screen runs today's rules on the bank text saved with each imported row.
+  - It sets the rule's payee, and the category from the amount rule or the payee's usual category.
+  - **Only uncategorized rows** are offered (your choice), and the payee is set too.
+  - Left out: transfers and rows in closed accounts.
+  - Preview first, then a backup (`…-reapply-rules.db`), then all-or-nothing. A row you categorize after the preview is skipped, not overwritten.
 - **Payee approach (your question, answered):** a `payees` table for quick entry with default categories, plus `payee_rules` that map bank text to payees at import. **CSV files are never cleaned by hand.**
 
 ### Transfers (milestone 7)
@@ -217,7 +224,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 11b | Merge several ticked payees, remembering their names as rules | Done | `eefaed5` |
 | 11c | Amount rule per payee; backup before a new table is added | Done | `84a15c6` |
 | 12a | Versioned schema upgrades (`user_version` + upgrade steps) | Done | `f745df4` |
-| 12b | Amount rule fills the category in register entry | Done | (this commit) |
+| 12b | Amount rule fills the category in register entry | Done | `d8a970a` |
+| 13 | Apply rules to uncategorized imported rows (Payees screen) | Done | (this commit) |
 | — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
 | Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
@@ -230,8 +238,7 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
    - Add your accounts with their opening balances, then import your first Chase downloads.
 
    Using the app on real data before phase 2 will show what's missing (splits, card display, rule types) better than guessing.
-2. **Decide the schema-upgrade approach** (§7, item 2) before phase 2 adds any tables.
-3. **Phase 2 (budget).** It starts with a plan for you to approve, covering the budget model (§7, item 1). Nothing gets built before that.
+2. **Phase 2 (budget).** It starts with a plan for you to approve, covering the budget model (§7, item 1). Nothing gets built before that.
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 

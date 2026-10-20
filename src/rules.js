@@ -72,3 +72,47 @@ export function suggestPattern(description) {
   const shortened = beforeNumbers.split(' ').slice(0, 3).join(' ');
   return shortened.length >= 3 ? shortened : whole;
 }
+
+// What re-applying today's rules would do to imported rows that are still
+// uncategorized, e.g. rows imported before the rules were set up. Re-importing
+// the bank file can't do this: its rows are all already imported, so they're
+// skipped. Each row makes the same choices an import does (see the import
+// preview in server.js):
+//   - payee: the rule that fits the row's saved bank text, else its current payee;
+//   - category: that payee's amount rule if it has one, else its default category.
+// `rows` come from db.uncategorizedImportedRows(); `amountRuleFor(payeeId)`
+// returns a payee's amount rule, or undefined.
+// Returns { proposals, unchanged }: each row that would change, with its new
+// payee and category added, and a count of rows no rule helps with yet.
+export function proposeRuleResults(rows, rules, amountRuleFor) {
+  const proposals = [];
+  let unchanged = 0;
+
+  for (const row of rows) {
+    const rule = matchRule(row.bank_description, rules);
+    let payee = null;
+    if (rule) {
+      payee = { id: rule.payee_id, name: rule.payee_name, defaultCategoryId: rule.default_category_id };
+    } else if (row.payee_id !== null) {
+      payee = { id: row.payee_id, name: row.payee, defaultCategoryId: row.payee_default_category_id };
+    }
+
+    let categoryId = payee?.defaultCategoryId ?? null;
+    const amountRule = payee ? amountRuleFor(payee.id) : undefined;
+    if (amountRule) categoryId = categoryForAmount(amountRule, row.amount_cents);
+
+    const payeeChanges = payee !== null && payee.id !== row.payee_id;
+    if (!payeeChanges && categoryId === null) {
+      unchanged++;
+      continue;
+    }
+    proposals.push({
+      ...row,
+      rule: rule ? { matchType: rule.match_type, pattern: rule.pattern } : null,
+      newPayeeId: payee.id,
+      newPayee: payee.name,
+      newCategoryId: categoryId,
+    });
+  }
+  return { proposals, unchanged };
+}

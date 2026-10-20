@@ -180,6 +180,34 @@
       Import rules turn bank text into a payee; changing a rule affects future
       imports only. Click a rule's row count to see the bank text it picks.
     </p>
+    <p>
+      <button type="button" id="show-reapply"
+        title="Run today's rules on imported rows that still have no category">Apply rules to uncategorized rows…</button>
+    </p>
+    <!-- Hidden until "Apply rules to uncategorized rows…" is clicked (payees.js). -->
+    <section id="reapply-panel" class="import-panel" hidden>
+      <h3>Apply rules to uncategorized rows</h3>
+      <p id="reapply-summary"></p>
+      <table class="register-grid">
+        <thead>
+          <tr>
+            <th class="col-clr"><input type="checkbox" id="reapply-tick-all" title="Tick every row"></th>
+            <th class="col-date">Date</th>
+            <th>Account</th>
+            <th>Bank description</th>
+            <th class="col-payee">Payee</th>
+            <th class="col-category">Category</th>
+            <th class="col-money">Amount</th>
+            <th class="col-clr" title="Cleared (c) or reconciled (R)">Clr</th>
+          </tr>
+        </thead>
+        <tbody id="reapply-rows"></tbody>
+      </table>
+      <div class="form-buttons">
+        <button type="button" id="commit-reapply"></button>
+        <button type="button" id="cancel-reapply">Cancel</button>
+      </div>
+    </section>
     <input id="payee-filter" type="search" placeholder="Filter payees and rules" autocomplete="off">
     <!-- Shown while any payee is ticked (payees.js). -->
     <div id="merge-bar" hidden>

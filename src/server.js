@@ -16,7 +16,7 @@ import * as db from './db.js';
 import { runningBalances, clearedBalance } from './money.js';
 import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
-import { matchRule, ruleMatches, suggestPattern, categoryForAmount } from './rules.js';
+import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
 
 // --- Input checks ---
 //
@@ -198,6 +198,12 @@ function readImportFile(body) {
     // the user's to fix, not a server fault.
     throw httpError(400, err.message);
   }
+}
+
+// What re-applying today's payee rules would change on uncategorized
+// imported rows. Used by both the preview and the commit, so they agree.
+function ruleProposals() {
+  return proposeRuleResults(db.uncategorizedImportedRows(), db.listPayeeRules(), db.getAmountRule);
 }
 
 function requireTransaction(id) {
@@ -457,6 +463,36 @@ const apiRoutes = {
     const rules = db.listPayeeRules();
     if (!rules.some((r) => r.id === id)) throw httpError(404, 'No such rule');
     return ruleMatches(rules, db.importedDescriptions()).get(id);
+  },
+
+  // --- Re-applying rules to rows imported before the rules existed ---
+  //
+  // Re-importing the bank file can't do this: every row in it is already
+  // imported, so the import skips them all. Instead, today's rules run against
+  // the bank text saved on each imported row. Only uncategorized rows are
+  // touched, so a category you chose yourself is never overwritten.
+
+  // Each row that would change, plus how many uncategorized rows no rule helps.
+  'GET /api/reapply-rules/preview': () => {
+    const { proposals, unchanged } = ruleProposals();
+    return { rows: proposals, unchanged };
+  },
+
+  // { ids }: the rows you left ticked. Their new payee and category are worked
+  // out again here rather than taken from the page, the same way an import
+  // re-reads its file. A ticked row that no longer qualifies (you categorized
+  // it meanwhile) is skipped.
+  'POST /api/reapply-rules/commit': (body) => {
+    if (!Array.isArray(body.ids)) throw httpError(400, 'No rows chosen');
+    const wanted = new Set(body.ids.map(requireId));
+    const changes = ruleProposals()
+      .proposals.filter((p) => wanted.has(p.id))
+      .map((p) => ({ id: p.id, payeeId: p.newPayeeId, categoryId: p.newCategoryId }));
+
+    // Back up first: this changes many rows at once.
+    const backupFile = changes.length > 0 ? makeBackup('reapply-rules') : null;
+    const updated = db.applyRuleResults(changes);
+    return { updated, skipped: wanted.size - updated, backupFile };
   },
 
   // Adding and changing rules: { matchType, pattern, payeeName }, plus { id }
