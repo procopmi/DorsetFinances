@@ -18,6 +18,8 @@ import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
 import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
 import { buildBudget } from './budget.js';
+import { spendingByCategory } from './reports.js';
+import { monthRange } from './periods.js';
 
 // --- Input checks ---
 //
@@ -71,6 +73,15 @@ function requireMonth(value) {
     throw httpError(400, `"${value}" is not a valid month`);
   }
   return value;
+}
+
+// A report's date range from the query: ?from=YYYY-MM-DD&to=YYYY-MM-DD,
+// both included. 'YYYY-MM-DD' text sorts in date order, so < compares dates.
+function requireRange(query) {
+  const from = requireDate(query.from);
+  const to = requireDate(query.to);
+  if (from > to) throw httpError(400, 'The From date is after the To date');
+  return { from, to };
 }
 
 // Optional text such as a memo: blank becomes null (nothing stored), and very
@@ -261,7 +272,16 @@ const apiRoutes = {
   'GET /api/budget': (query) => {
     const month = requireMonth(query.month);
     const plans = { month, plans: db.listBudgetPlans(), overrides: db.listBudgetOverrides(month) };
-    return { month, ...buildBudget(db.listCategories(), db.monthActuals(month), plans) };
+    const { from, to } = monthRange(month);
+    return { month, ...buildBudget(db.listCategories(), db.actualsBetween(from, to), plans) };
+  },
+
+  // --- Reports ---
+
+  // Spending by category over a date range (?from=...&to=..., both included).
+  'GET /api/reports/spending': (query) => {
+    const { from, to } = requireRange(query);
+    return { from, to, ...spendingByCategory(db.listCategories(), db.actualsBetween(from, to)) };
   },
 
   // Sets one category's planned amount. scope says how far it reaches:
@@ -844,10 +864,12 @@ const contentTypes = {
 // Files outside public/ that the browser is allowed to load. money.js is
 // shared so the page parses and formats amounts with exactly the same (tested)
 // code as the server; rules.js likewise, so the import preview picks a
-// category by amount the same way. Listing files one by one keeps the rest
+// category by amount the same way, and periods.js so the report period
+// buttons use the tested date math. Listing files one by one keeps the rest
 // of src/ private.
 const sharedFiles = {
   '/money.js': fileURLToPath(new URL('./money.js', import.meta.url)),
+  '/periods.js': fileURLToPath(new URL('./periods.js', import.meta.url)),
   '/rules.js': fileURLToPath(new URL('./rules.js', import.meta.url)),
 };
 

@@ -2,6 +2,7 @@
    right so the decimal points line up the way they do in a paper register. */
 
 :root {
+  --chart-bar: #2563eb;  /* the one hue for single-series bars */
   --border: #c9ced6;
   --muted: #6b7280;
   --header-bg: #eef1f5;
@@ -150,6 +151,61 @@ body {
 .override-mark {
   margin-left: 4px;
   color: var(--focus);
+}
+
+/* --- Reports screen --- */
+
+.period-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.period-picker button[aria-pressed="true"] {
+  border-color: var(--focus);
+  font-weight: 600;
+}
+
+.spending-table .col-bar {
+  width: 45%;
+}
+
+/* A group's name is a button that opens and closes its subs; styled as
+   plain text so the table still reads like a table. */
+.group-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.spending-table .group-row td,
+.spending-table .total-row td {
+  font-weight: 600;
+}
+
+.spending-table .total-row td {
+  border-top: 2px solid var(--border);
+}
+
+.spending-table .sub-row td:first-child {
+  padding-left: 28px;
+}
+
+/* A horizontal bar: grows from the left, square there, rounded at its end.
+   Thin, so the row keeps some air. Its width is set by reports.js. */
+.bar {
+  height: 12px;
+  background: var(--chart-bar);
+  border-radius: 0 4px 4px 0;
+}
+
+.sub-row .bar {
+  height: 6px;
+  opacity: 0.55;
 }
 
 /* --- Categories and Payees screens --- */

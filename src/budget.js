@@ -1,5 +1,5 @@
 // The Budget screen's arithmetic: turns one month's per-category totals
-// (from db.monthActuals) and planned amounts (db.listBudgetPlans and
+// (from db.actualsBetween) and planned amounts (db.listBudgetPlans and
 // db.listBudgetOverrides) into the Income and Expenses sections the page
 // shows, with group roll-ups, section totals and the net.
 //
@@ -38,18 +38,13 @@ export function plannedFor(categoryId, month, plans, overrides) {
   return { cents: latest ? requireCents(latest.amount_cents) : 0, isOverride: false };
 }
 
-// categories: every category (db.listCategories), groups and subs.
-// actualRows: db.monthActuals(month).
-// plans, overrides: db.listBudgetPlans() and db.listBudgetOverrides(month).
-// Returns {
-//   income:   { groups, uncategorized: { cents, count, differenceCents }, plannedCents, actualCents, differenceCents },
-//   expenses: { same shape, plus recurring and other: { plannedCents, actualCents, differenceCents } },
-//   plannedNetCents, actualNetCents   (income minus expenses)
-// }
-// where each group is { id, name, plannedCents, actualCents, differenceCents,
-// subs: [{ id, name, isHidden, isRecurring, plannedCents, isOverride, actualCents, differenceCents }] }.
-export function buildBudget(categories, actualRows, { month, plans, overrides }) {
-  // Signed register total per category id, refunds and charges added together.
+// The first step of every money view (Budget and the reports): turns
+// db.actualsBetween rows into
+//   signedByCategory: Map of category id -> register total (signed, so
+//                     charges and refunds are already added together);
+//   uncategorizedIn / uncategorizedOut: { cents, count }, both positive.
+// Shared so the Budget screen and the reports can never count differently.
+export function sumActuals(actualRows) {
   const signedByCategory = new Map();
   const uncategorizedIn = { cents: 0, count: 0 };
   const uncategorizedOut = { cents: 0, count: 0 };
@@ -66,6 +61,21 @@ export function buildBudget(categories, actualRows, { month, plans, overrides })
       signedByCategory.set(row.category_id, (signedByCategory.get(row.category_id) ?? 0) + cents);
     }
   }
+  return { signedByCategory, uncategorizedIn, uncategorizedOut };
+}
+
+// categories: every category (db.listCategories), groups and subs.
+// actualRows: db.actualsBetween(first day, last day of the month).
+// plans, overrides: db.listBudgetPlans() and db.listBudgetOverrides(month).
+// Returns {
+//   income:   { groups, uncategorized: { cents, count, differenceCents }, plannedCents, actualCents, differenceCents },
+//   expenses: { same shape, plus recurring and other: { plannedCents, actualCents, differenceCents } },
+//   plannedNetCents, actualNetCents   (income minus expenses)
+// }
+// where each group is { id, name, plannedCents, actualCents, differenceCents,
+// subs: [{ id, name, isHidden, isRecurring, plannedCents, isOverride, actualCents, differenceCents }] }.
+export function buildBudget(categories, actualRows, { month, plans, overrides }) {
+  const { signedByCategory, uncategorizedIn, uncategorizedOut } = sumActuals(actualRows);
 
   const planOf = (id) => plannedFor(id, month, plans, overrides);
   const income = buildSection(categories, 'income', signedByCategory, planOf, uncategorizedIn);

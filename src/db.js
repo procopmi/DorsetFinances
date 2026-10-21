@@ -278,8 +278,9 @@ export function deleteCategory(id) {
 
 // --- Budget ---
 
-// One month's money per category, for the Budget screen. month is 'YYYY-MM';
-// dates are 'YYYY-MM-DD' text, so the first 7 characters are the month.
+// The money per category between two dates (both included, 'YYYY-MM-DD'),
+// for the Budget screen (one month) and the reports (any range). Dates are
+// stored as 'YYYY-MM-DD' text, which sorts in date order, so BETWEEN works.
 // Every account counts (closed ones too: it's still history), and cleared
 // status doesn't matter. Transfers are left out: they only move money
 // between your own accounts, so they're neither income nor spending.
@@ -290,16 +291,16 @@ export function deleteCategory(id) {
 // refund still lowers that category's spending.
 // Returns rows of { category_id (null = uncategorized), money_in (1 or 0),
 // total_cents, count }.
-export function monthActuals(month) {
+export function actualsBetween(from, to) {
   return db
     .prepare(
       `SELECT category_id, amount_cents > 0 AS money_in,
               SUM(amount_cents) AS total_cents, COUNT(*) AS count
          FROM transactions
-        WHERE substr(date, 1, 7) = ? AND transfer_id IS NULL
+        WHERE date BETWEEN ? AND ? AND transfer_id IS NULL
         GROUP BY category_id, money_in`
     )
-    .all(month);
+    .all(from, to);
 }
 
 // Every standing planned amount: { category_id, start_month, amount_cents }.

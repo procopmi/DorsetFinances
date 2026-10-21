@@ -21,6 +21,7 @@
     <nav class="screen-nav">
       <button type="button" data-screen="register">Register</button>
       <button type="button" data-screen="budget">Budget</button>
+      <button type="button" data-screen="reports">Reports</button>
       <button type="button" data-screen="categories">Categories</button>
       <button type="button" data-screen="payees">Payees</button>
     </nav>
@@ -186,6 +187,36 @@
         </tr>
       </thead>
       <tbody id="budget-rows"></tbody>
+    </table>
+  </main>
+
+  <!-- ===== Reports screen (reports.js) ===== -->
+  <main id="reports-view" class="screen" hidden>
+    <h2>Spending by category</h2>
+    <!-- The period: a preset button, or your own From/To dates (both included). -->
+    <div class="period-picker">
+      <button type="button" data-preset="this-month">This month</button>
+      <button type="button" data-preset="last-month">Last month</button>
+      <button type="button" data-preset="ytd">Year to date</button>
+      <button type="button" data-preset="last-12">Last 12 months</button>
+      <button type="button" data-preset="last-year">Last year</button>
+      <label>From <input type="date" id="report-from"></label>
+      <label>To <input type="date" id="report-to"></label>
+    </div>
+    <p class="muted">
+      Money spent in the period, from all accounts. Refunds lower their category's spending, and
+      transfers between your own accounts aren't counted. Click a group to see its sub-categories.
+    </p>
+    <table class="simple-table spending-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th class="col-bar"></th>
+          <th class="col-money">Spent</th>
+          <th class="col-money">Share</th>
+        </tr>
+      </thead>
+      <tbody id="spending-rows"></tbody>
     </table>
   </main>
 

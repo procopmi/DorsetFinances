@@ -11,6 +11,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as db from '../src/db.js';
 import { buildBudget, plannedFor } from '../src/budget.js';
+import { monthRange } from '../src/periods.js';
 
 let checking;
 let card;
@@ -39,7 +40,7 @@ function add(accountId, date, amountCents, categoryId = null) {
 }
 
 const budgetFor = (month) =>
-  buildBudget(db.listCategories(), db.monthActuals(month), {
+  buildBudget(db.listCategories(), db.actualsBetween(monthRange(month).from, monthRange(month).to), {
     month,
     plans: db.listBudgetPlans(),
     overrides: db.listBudgetOverrides(month),

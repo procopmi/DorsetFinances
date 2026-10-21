@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-21, after milestone 14c. **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" for the phase 2 design, §6 for progress and §7 for open decisions.
+Last updated 2026-10-21, during phase 3 (milestone 15a). **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" and "Reports" for the phase 2 and 3 designs, §6 for progress and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 102 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 114 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -44,15 +44,17 @@ src/
   migrations.js       upgrade steps for older databases (imported only by db.js)
   money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
   budget.js           the Budget screen's math (actuals per category, group and section totals)
+  reports.js          the Reports screen's math (spending by category)
+  periods.js          report date ranges: preset buttons, a month's first/last day (shared with the browser)
   csv.js              CSV export and bank-file parsing
   rules.js            payee-rule matching and pattern suggestion
   default-categories.js  the approved category list as data
   backup.js           timestamped backups (VACUUM INTO)
   server.js           routes, input checks, request guard
 public/               index.html, styles.css, main.js (screen switcher), api.js (shared helpers),
-                      register.js, budget.js, categories.js, payees.js, import.js
+                      register.js, budget.js, reports.js, categories.js, payees.js, import.js
 scripts/              seed-sample.js, setup-real.js, backup.js
-test/                 money, balances, transfers, csv, rules, import, reapply, schema, budget
+test/                 money, balances, transfers, csv, rules, import, reapply, schema, budget, reports, periods
 sample-data/          sample.db and backups/ (generated, gitignored)
 ```
 
@@ -232,6 +234,21 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **(recap)** Only subs carry the flag, and only expense subs show the tickbox.
 - **Schema plan:** v2 adds `budget_plans` (category, start month, amount) and `budget_overrides` (category, month, amount). v3 adds `categories.is_recurring`. Your real database is backed up and upgraded automatically on the first `npm start` after each.
 
+### Reports (phase 3, planned 2026-10-21)
+- **Your choices:** all four views (Spending by category, Monthly trend, Income vs. expenses, Dashboard); a period picker with presets plus custom From/To; click an amount to list its transactions (reports and Budget); hand-built charts, no library.
+- **Same counting rules as the Budget screen.** All reports share `sumActuals` in `src/budget.js`, so they can't disagree. All accounts count, transfers are left out, spending is shown positive and refunds lower it, uncategorized has its own line, and date ranges include both ends.
+- **No schema change** in phase 3: reports only read.
+- **The Register stays the opening screen.** Dashboard and Reports are extra tabs.
+- **Spending by category (15a):**
+  - Expense groups largest first, with a bar and a share of all spending. Click a group to open its subs.
+  - **(recap)** Only categories with spending in the period are listed.
+  - **(recap)** Shares are whole percents for display, so they can add up to 99 or 101.
+  - **(recap)** Bars are scaled to the largest group. A category with more refunds than spending shows a red amount and no bar.
+- **(recap) Period presets:**
+  - "This month" is the whole month (it includes post-dated entries).
+  - "Year to date" ends today.
+  - "Last 12 months" is the 12 whole months ending with this one.
+
 ## 6. Milestones
 
 | # | Milestone | Status | Commit |
@@ -260,12 +277,15 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | — | **Your real-data setup:** `.env`, `npm run setup`, 6 accounts, categories, imports and rules | Done by you (reported 2026-10-21; some cleanup still going on) | — |
 | 14a | Budget screen, read-only: actuals per category by month | Done | `3d00613` |
 | 14b | Planned amounts: standing + overrides, Difference column, summary (schema v2) | Done | `ba1d97c` |
-| 14c | Recurring flag and subtotals (schema v3) | Done | (this commit) |
-| Phase 3 | Reports and dashboard: spending by category | Not started | — |
+| 14c | Recurring flag and subtotals (schema v3) | Done | `5c1a9e2` |
+| 15a | Reports screen, period picker, Spending by category | Done | (this commit) |
+| 15b | Drill-down: click an amount to list its transactions (reports and Budget) | Next | — |
+| 15c | Monthly trend | Planned | — |
+| 15d | Income vs. expenses (cash flow) | Planned | — |
+| 15e | Dashboard | Planned | — |
 
 ### What's next
-1. **Your next `npm start` upgrades your real database to schema v3** after a `…-upgrade.db` backup: from v1 (if you haven't started it since 14b) it runs both steps in one go. Both steps were tested on copies of a sample database.
-2. **Use the budget on real data for a while**, then **phase 3 (reports and dashboard)**, which starts with a plan for you to approve.
+1. **15b: drill-down**, then 15c to 15e (see the table above). Phase 3 doesn't change the schema, so your real database stays at v3.
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 
