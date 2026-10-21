@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-21, during phase 3 (milestone 15d). **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" and "Reports" for the phase 2 and 3 designs, §6 for progress and §7 for open decisions.
+Last updated 2026-10-21, after milestone 15e. **Phases 1, 2 and 3 are complete, and your real data is live.** See §5 "Budget" and "Reports" for the phase 2 and 3 designs, §6 for progress and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 130 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 134 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -44,7 +44,7 @@ src/
   migrations.js       upgrade steps for older databases (imported only by db.js)
   money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
   budget.js           the Budget screen's math (actuals per category, group and section totals)
-  reports.js          the Reports screen's math (spending by category, monthly trend, income vs. expenses)
+  reports.js          the Reports and Dashboard math (spending by category, monthly trend, income vs. expenses, over plan, top spending)
   periods.js          report date ranges: preset buttons, a month's first/last day (shared with the browser)
   csv.js              CSV export and bank-file parsing
   rules.js            payee-rule matching and pattern suggestion
@@ -52,7 +52,7 @@ src/
   backup.js           timestamped backups (VACUUM INTO)
   server.js           routes, input checks, request guard
 public/               index.html, styles.css, main.js (screen switcher), api.js (shared helpers),
-                      register.js, budget.js, reports.js, cashflow-chart.js, drilldown.js, categories.js, payees.js, import.js
+                      register.js, dashboard.js, budget.js, reports.js, cashflow-chart.js, drilldown.js, categories.js, payees.js, import.js
 scripts/              seed-sample.js, setup-real.js, backup.js
 test/                 money, balances, transfers, csv, rules, import, reapply, schema, budget, reports, periods
 sample-data/          sample.db and backups/ (generated, gitignored)
@@ -268,6 +268,14 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
     - It's drawn in plain SVG (`public/cashflow-chart.js`) at real pixel size, so many months scroll sideways rather than shrinking the text.
   - **(recap)** The cash-flow amounts aren't clickable: money in and out mix many categories, and the drill-down lists one category (or uncategorized) at a time.
   - **(recap)** It shares the 36-month limit with the trend.
+- **Dashboard (15e):**
+  - A new tab after Register (the Register is still the opening screen). "This month" is the Mac's current month.
+  - **Accounts:** each open account's balance and cleared balance, the same figures as its register (a test checks this), and an "All accounts" total (what you have minus card balances owed). Click a name to open that register. Closed accounts are left out.
+  - **This month's budget:** income, expenses and net, planned vs. actual, plus the **5 categories furthest over plan**. "Over by" is shown as a positive amount in red.
+  - **Top spending:** this month's 5 biggest groups next to the same groups last month.
+  - "Open Budget →" and "Open Reports →" switch screens.
+  - **(recap)** A category with **no plan** but some spending counts as over plan (by all it spent). Until your budget is filled in, that list will mostly show your biggest unplanned costs. Leaving out unplanned categories would be a one-line change.
+  - **(recap)** The Dashboard's amounts aren't clickable (no drill-down). The Budget and Reports screens have that.
 - **(recap) Period presets:**
   - "This month" is the whole month (it includes post-dated entries).
   - "Year to date" ends today.
@@ -305,11 +313,14 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 15a | Reports screen, period picker, Spending by category | Done | `451882c` |
 | 15b | Drill-down: click an amount to list its transactions (reports and Budget) | Done | `9ef0efb` |
 | 15c | Monthly trend | Done | `941a4e1` |
-| 15d | Income vs. expenses (cash flow) | Done | (this commit) |
-| 15e | Dashboard | Next | — |
+| 15d | Income vs. expenses (cash flow) | Done | `5157e89` |
+| 15e | Dashboard | Done | (this commit) |
 
 ### What's next
-1. **15e: dashboard**, the last step of phase 3. Phase 3 doesn't change the schema, so your real database stays at v3.
+All three phases in CLAUDE.md are built. Nothing is planned next. Ideas that came up along the way, for whenever real use calls for them:
+1. Items 3–4 in §7 (split transactions, the credit card display).
+2. Small tidy-ups noticed while building: `server.js` has its own copy of `todayText` (the same as `periods.js`), and a missing date gives the message `"undefined" is not a valid date`.
+3. Whether "over plan" on the Dashboard should leave out categories with no plan (see §5 "Reports").
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 

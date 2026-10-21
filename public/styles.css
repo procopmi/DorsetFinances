@@ -73,6 +73,44 @@ body {
   font-weight: 600;
 }
 
+/* --- Dashboard --- */
+
+.dashboard-card {
+  margin-bottom: 24px;
+}
+
+.dashboard-card h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.dashboard-card h4 {
+  margin: 12px 0 4px;
+}
+
+/* A button that looks like a link: for "Open Budget →" and account names. */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: normal;
+  color: var(--focus);
+  cursor: pointer;
+}
+
+.link-button:hover,
+.link-button:focus-visible {
+  text-decoration: underline;
+}
+
+.dashboard .total-row td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+}
+
 /* --- Budget screen --- */
 
 .budget-header {

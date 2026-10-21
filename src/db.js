@@ -106,6 +106,28 @@ export function listAccounts() {
 }
 
 // One account, or undefined if there's no account with that id.
+// Each open account's balance and cleared balance, for the Dashboard, in
+// the sidebar's order. Same rule as the register (money.js runningBalances
+// and clearedBalance): opening balance plus every transaction, or plus only
+// the cleared and reconciled ones. SQLite adds whole numbers exactly, so the
+// sums are exact cents. LEFT JOIN keeps an account with no transactions
+// (COALESCE turns its empty sum into 0).
+export function accountBalances() {
+  return db
+    .prepare(
+      `SELECT a.id, a.name, a.type,
+              a.opening_balance_cents + COALESCE(SUM(t.amount_cents), 0) AS balance_cents,
+              a.opening_balance_cents + COALESCE(SUM(CASE WHEN t.status IN ('cleared', 'reconciled')
+                                                          THEN t.amount_cents END), 0) AS cleared_cents
+         FROM accounts a
+         LEFT JOIN transactions t ON t.account_id = a.id
+        WHERE a.is_closed = 0
+        GROUP BY a.id
+        ORDER BY a.sort_order, a.name`
+    )
+    .all();
+}
+
 export function getAccount(id) {
   return db
     .prepare(

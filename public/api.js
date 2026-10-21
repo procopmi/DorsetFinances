@@ -36,6 +36,12 @@ export function runAction(action) {
   });
 }
 
+// Switches to another screen ('register', 'budget', ...) by pressing its
+// button in the top bar, so main.js stays the one place that switches screens.
+export function openScreen(name) {
+  document.querySelector(`[data-screen="${name}"]`).click();
+}
+
 // A <button> that runs `action` through runAction when clicked.
 export function makeButton(label, action, className) {
   const button = document.createElement('button');

@@ -8,7 +8,8 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as db from '../src/db.js';
-import { spendingByCategory, monthlyTrend, cashFlow } from '../src/reports.js';
+import { spendingByCategory, monthlyTrend, cashFlow, overPlan, topSpendingGroups } from '../src/reports.js';
+import { runningBalances, clearedBalance } from '../src/money.js';
 import { buildBudget } from '../src/budget.js';
 import { monthsBetween } from '../src/periods.js';
 
@@ -267,4 +268,67 @@ test('the total net equals the change across all registers, transfers aside', ()
     .filter((t) => t.date >= '2026-02-01' && t.date <= '2026-04-30' && t.transfer_id === null)
     .reduce((sum, t) => sum + t.amount_cents, 0);
   assert.equal(flow('2026-02-01', '2026-04-30').total.netCents, registerNet);
+});
+
+// --- Dashboard ---
+
+test("account balances match the register's own balance and cleared balance", () => {
+  const savings = db.createAccount({ name: 'Savings', type: 'savings', openingBalanceCents: 250000, openingDate: '2026-01-01' });
+  add(checking, '2026-03-01', 300000, pay);
+  add(checking, '2026-03-02', -4550, dining);
+  db.setTransactionStatus(add(checking, '2026-03-03', -12000, groceries), 'cleared');
+  db.setTransactionStatus(add(card, '2026-03-04', -9999, groceries), 'reconciled');
+  add(card, '2026-03-05', -100, dining);
+  db.createTransaction({ accountId: checking, date: '2026-03-10', amountCents: -5000, payeeName: 'Pay card', transferAccountId: card });
+
+  const balances = db.accountBalances();
+  for (const id of [checking, card, savings]) {
+    const account = db.getAccount(id);
+    const rows = db.getRegister(id);
+    const line = balances.find((b) => b.id === id);
+    const expected = runningBalances(account.opening_balance_cents, rows.map((r) => r.amount_cents)).at(-1) ?? account.opening_balance_cents;
+    assert.equal(line.balance_cents, expected, account.name);
+    assert.equal(line.cleared_cents, clearedBalance(account.opening_balance_cents, rows), account.name);
+  }
+  // The card owes money, so its balance is negative, as in the register.
+  assert.equal(balances.find((b) => b.id === card).balance_cents, -9999 - 100 + 5000);
+  // An account with no transactions shows its opening balance.
+  assert.equal(balances.find((b) => b.id === savings).balance_cents, 250000);
+});
+
+test('closed accounts are left off the dashboard', () => {
+  db.setAccountClosed(card, true);
+  assert.deepEqual(db.accountBalances().map((b) => b.name), ['Checking']);
+});
+
+test('over plan lists only overspent categories, most over first', () => {
+  const budget = {
+    expenses: {
+      groups: [
+        { name: 'Food', subs: [
+          { id: 1, name: 'Groceries', plannedCents: 50000, actualCents: 52000, differenceCents: -2000 },
+          { id: 2, name: 'Dining Out', plannedCents: 10000, actualCents: 25000, differenceCents: -15000 },
+        ] },
+        { name: 'Utilities', subs: [
+          { id: 3, name: 'Electric', plannedCents: 12000, actualCents: 9000, differenceCents: 3000 },
+          { id: 4, name: 'Water', plannedCents: 0, actualCents: 4000, differenceCents: -4000 },
+        ] },
+      ],
+    },
+  };
+  assert.deepEqual(overPlan(budget, 5).map((s) => [s.group, s.name, s.overCents]), [
+    ['Food', 'Dining Out', 15000],
+    ['Utilities', 'Water', 4000],
+    ['Food', 'Groceries', 2000],
+  ]);
+  assert.equal(overPlan(budget, 1).length, 1);
+});
+
+test('top spending groups show last month next to this month', () => {
+  add(card, '2026-03-05', -30000, groceries);
+  add(checking, '2026-03-10', -20000, electric);
+  add(checking, '2026-02-10', -18000, electric);
+  const top = topSpendingGroups(spending('2026-03-01', '2026-03-31'), spending('2026-02-01', '2026-02-28'), 5);
+  assert.deepEqual(top.map((g) => [g.name, g.cents, g.lastMonthCents]), [['Food', 30000, 0], ['Utilities', 20000, 18000]]);
+  assert.equal(topSpendingGroups(spending('2026-03-01', '2026-03-31'), spending('2026-02-01', '2026-02-28'), 1).length, 1);
 });

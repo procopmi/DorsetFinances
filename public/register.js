@@ -22,6 +22,12 @@ export function show() {
   return reloadAccounts();
 }
 
+// Chooses the account the register shows next time it's opened (used by the
+// Dashboard's account links, just before switching to this screen).
+export function selectAccount(id) {
+  selectedId = id;
+}
+
 // --- Drawing the page ---
 
 async function reloadAccounts() {

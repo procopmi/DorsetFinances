@@ -20,6 +20,7 @@
     <!-- Screen switcher (see main.js). -->
     <nav class="screen-nav">
       <button type="button" data-screen="register">Register</button>
+      <button type="button" data-screen="dashboard">Dashboard</button>
       <button type="button" data-screen="budget">Budget</button>
       <button type="button" data-screen="reports">Reports</button>
       <button type="button" data-screen="categories">Categories</button>
@@ -150,6 +151,56 @@
       <!-- Suggestions for the Payee and Category boxes, filled in by register.js. -->
       <datalist id="payee-options"></datalist>
       <datalist id="category-options"></datalist>
+    </section>
+  </main>
+
+  <!-- ===== Dashboard screen (dashboard.js) ===== -->
+  <main id="dashboard-view" class="screen dashboard" hidden>
+    <h2>Dashboard <span id="dashboard-month" class="muted"></span></h2>
+
+    <section class="dashboard-card">
+      <h3>Accounts</h3>
+      <table class="simple-table">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th class="col-money">Balance</th>
+            <th class="col-money" title="Opening balance plus cleared (c) and reconciled (R) items">Cleared</th>
+          </tr>
+        </thead>
+        <tbody id="dashboard-accounts"></tbody>
+      </table>
+    </section>
+
+    <section class="dashboard-card">
+      <h3>This month's budget <button type="button" class="link-button" data-open-screen="budget">Open Budget →</button></h3>
+      <div id="dashboard-budget" class="budget-summary"></div>
+      <h4>Furthest over plan</h4>
+      <table class="simple-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th class="col-money">Planned</th>
+            <th class="col-money">Actual</th>
+            <th class="col-money">Over by</th>
+          </tr>
+        </thead>
+        <tbody id="dashboard-over"></tbody>
+      </table>
+    </section>
+
+    <section class="dashboard-card">
+      <h3>Top spending this month <button type="button" class="link-button" data-open-screen="reports">Open Reports →</button></h3>
+      <table class="simple-table">
+        <thead>
+          <tr>
+            <th>Group</th>
+            <th class="col-money">This month</th>
+            <th class="col-money">Last month</th>
+          </tr>
+        </thead>
+        <tbody id="dashboard-top"></tbody>
+      </table>
     </section>
   </main>
 

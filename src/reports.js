@@ -132,6 +132,37 @@ export function cashFlow(categories, monthlyRows, months) {
   return { months: rows, total: { inCents: total('inCents'), outCents: total('outCents'), netCents: total('netCents') } };
 }
 
+// --- Dashboard ---
+
+// The expense categories furthest over plan in a budget (from buildBudget),
+// most over first: [{ id, group, name, plannedCents, actualCents, overCents }].
+// Only categories actually over plan are listed, so there may be fewer.
+export function overPlan(budget, count) {
+  return budget.expenses.groups
+    .flatMap((group) => group.subs.map((sub) => ({ group: group.name, ...sub })))
+    .filter((sub) => sub.differenceCents < 0)
+    .sort((a, b) => a.differenceCents - b.differenceCents)
+    .slice(0, count)
+    .map((sub) => ({
+      id: sub.id,
+      group: sub.group,
+      name: sub.name,
+      plannedCents: sub.plannedCents,
+      actualCents: sub.actualCents,
+      overCents: -sub.differenceCents,
+    }));
+}
+
+// This month's biggest spending groups (from spendingByCategory), each next
+// to the same group last month (0 if it had none):
+// [{ id, name, cents, lastMonthCents }].
+export function topSpendingGroups(thisMonth, lastMonth, count) {
+  const lastById = new Map(lastMonth.groups.map((g) => [g.id, g.cents]));
+  return thisMonth.groups
+    .slice(0, count)
+    .map((g) => ({ id: g.id, name: g.name, cents: g.cents, lastMonthCents: lastById.get(g.id) ?? 0 }));
+}
+
 // One row of the trend: its monthly amounts, their total, and the average
 // month. The average is rounded to the nearest cent (so 100.00 over 3 months
 // shows 33.33); the total is exact.

@@ -18,8 +18,8 @@ import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
 import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
 import { buildBudget } from './budget.js';
-import { spendingByCategory, monthlyTrend, cashFlow } from './reports.js';
-import { monthRange, monthsBetween } from './periods.js';
+import { spendingByCategory, monthlyTrend, cashFlow, overPlan, topSpendingGroups } from './reports.js';
+import { monthRange, monthsBetween, presetRange } from './periods.js';
 
 // --- Input checks ---
 //
@@ -82,6 +82,13 @@ function requireRange(query) {
   const to = requireDate(query.to);
   if (from > to) throw httpError(400, 'The From date is after the To date');
   return { from, to };
+}
+
+// One month's budget ('YYYY-MM'), as the Budget screen and Dashboard show it.
+function budgetFor(month) {
+  const plans = { month, plans: db.listBudgetPlans(), overrides: db.listBudgetOverrides(month) };
+  const { from, to } = monthRange(month);
+  return buildBudget(db.listCategories(), db.actualsBetween(from, to), plans);
 }
 
 // The months a per-month report covers, capped at 36 so the grid and chart
@@ -279,9 +286,37 @@ const apiRoutes = {
   // spending per category, rolled up by group. The math is in budget.js.
   'GET /api/budget': (query) => {
     const month = requireMonth(query.month);
-    const plans = { month, plans: db.listBudgetPlans(), overrides: db.listBudgetOverrides(month) };
-    const { from, to } = monthRange(month);
-    return { month, ...buildBudget(db.listCategories(), db.actualsBetween(from, to), plans) };
+    return { month, ...budgetFor(month) };
+  },
+
+  // The Dashboard: open accounts' balances, this month's budget at a glance
+  // (with the categories furthest over plan), and this month's biggest
+  // spending groups next to last month's. "This month" is the Mac's today.
+  'GET /api/dashboard': () => {
+    const today = todayText();
+    const month = today.slice(0, 7);
+    const thisMonth = presetRange('this-month', today);
+    const lastMonth = presetRange('last-month', today);
+    const categories = db.listCategories();
+    const budget = budgetFor(month);
+    const accounts = db.accountBalances();
+    return {
+      month,
+      accounts,
+      accountsTotalCents: accounts.reduce((sum, a) => sum + a.balance_cents, 0),
+      budget: {
+        income: { plannedCents: budget.income.plannedCents, actualCents: budget.income.actualCents },
+        expenses: { plannedCents: budget.expenses.plannedCents, actualCents: budget.expenses.actualCents },
+        plannedNetCents: budget.plannedNetCents,
+        actualNetCents: budget.actualNetCents,
+      },
+      overPlan: overPlan(budget, 5),
+      topSpending: topSpendingGroups(
+        spendingByCategory(categories, db.actualsBetween(thisMonth.from, thisMonth.to)),
+        spendingByCategory(categories, db.actualsBetween(lastMonth.from, lastMonth.to)),
+        5
+      ),
+    };
   },
 
   // --- Reports ---
