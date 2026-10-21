@@ -44,4 +44,26 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    // Milestone 14b: planned amounts for the Budget screen. Two new, empty
+    // tables; no existing row is touched.
+    version: 2,
+    about: 'Budget planned amounts',
+    up(db) {
+      db.exec(`
+        CREATE TABLE budget_plans (
+          category_id  INTEGER NOT NULL REFERENCES categories(id),
+          start_month  TEXT    NOT NULL CHECK (start_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+          amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+          PRIMARY KEY (category_id, start_month)
+        ) STRICT;
+        CREATE TABLE budget_overrides (
+          category_id  INTEGER NOT NULL REFERENCES categories(id),
+          month        TEXT    NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+          amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+          PRIMARY KEY (category_id, month)
+        ) STRICT;
+      `);
+    },
+  },
 ];

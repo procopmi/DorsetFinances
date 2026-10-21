@@ -122,7 +122,8 @@ async function addSub(group) {
 // Permanent, so it always asks. The server refuses if the category is in use
 // (or is a group that still has subs) and says why.
 async function remove(category, label) {
-  if (!confirm(`Delete the category "${label}"?\n\nThis cannot be undone.`)) return;
+  const message = `Delete the category "${label}"?\n\nIts planned budget amounts are deleted too. This cannot be undone.`;
+  if (!confirm(message)) return;
   await postJson('/api/categories/delete', { id: category.id });
   await show();
 }

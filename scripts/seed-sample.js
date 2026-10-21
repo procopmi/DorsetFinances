@@ -109,6 +109,26 @@ db.setAmountRule({
   otherwiseCategoryId: categoryIds.get('Insurance: Life - Michael'),
 });
 
+// A starting budget: usual monthly amounts from January on, plus one
+// one-off (a bigger Dining Out amount in February), so the Budget screen
+// shows planned vs. actual, an overspent category and an override.
+const samplePlans = {
+  'Michael Income: Pay': 430000,
+  'Other Income: Interest': 400,
+  'Housing: Mortgage': 140000,
+  'Utilities: Electric': 12000,
+  'Utilities: Water': 5000,
+  'Auto: Fuel': 8000,
+  'Food: Groceries': 20000,
+  'Food: Dining Out': 5000,
+  'Pets: Pet Sitting': 6000,
+  'Subscriptions: Streaming & Media': 1500,
+};
+for (const [label, amountCents] of Object.entries(samplePlans)) {
+  db.setStandingPlan({ categoryId: categoryIds.get(label), fromMonth: '2026-01', amountCents });
+}
+db.setMonthOverride({ categoryId: categoryIds.get('Food: Dining Out'), month: '2026-02', amountCents: 15000 });
+
 console.log(
   `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts, ` +
     `${categoryIds.size} categories and ${sampleTransactions.length} transactions.`

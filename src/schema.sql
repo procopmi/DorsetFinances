@@ -64,6 +64,28 @@ CREATE TABLE IF NOT EXISTS payee_amount_rules (
   otherwise_category_id INTEGER NOT NULL REFERENCES categories(id)
 ) STRICT;
 
+-- Budget: standing monthly amounts. Each row says "from start_month on, plan
+-- amount_cents a month for this category", so a change from June on leaves
+-- January to May as they were. The amount for a month is the row with the
+-- latest start_month up to that month (see budget.js). Amounts are positive:
+-- expected spending for an expense category, expected income for an income one.
+-- (Added in phase 2, as upgrade step 2 in migrations.js.)
+CREATE TABLE IF NOT EXISTS budget_plans (
+  category_id  INTEGER NOT NULL REFERENCES categories(id),
+  start_month  TEXT    NOT NULL CHECK (start_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+  PRIMARY KEY (category_id, start_month)
+) STRICT;
+
+-- Budget: a one-month exception that beats the standing amount, e.g. a bigger
+-- Gifts amount in December. (Also upgrade step 2.)
+CREATE TABLE IF NOT EXISTS budget_overrides (
+  category_id  INTEGER NOT NULL REFERENCES categories(id),
+  month        TEXT    NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+  PRIMARY KEY (category_id, month)
+) STRICT;
+
 -- One row per register line. amount_cents is signed from the account's point
 -- of view: positive = money in, negative = money out (on a credit card a charge
 -- is negative). There is no balance column: the running balance is computed

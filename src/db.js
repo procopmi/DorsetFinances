@@ -257,10 +257,13 @@ export function countSubcategories(id) {
 
 // Permanently removes a category. The caller checks first that no transaction
 // uses it; the database's foreign key rule would refuse anyway. Payees that
-// used it as their default simply lose that default.
+// used it as their default simply lose that default, and its budget amounts
+// go with it (the page's confirm message says so).
 export function deleteCategory(id) {
   return allOrNothing(() => {
     db.prepare('UPDATE payees SET default_category_id = NULL WHERE default_category_id = ?').run(id);
+    db.prepare('DELETE FROM budget_plans WHERE category_id = ?').run(id);
+    db.prepare('DELETE FROM budget_overrides WHERE category_id = ?').run(id);
     return db.prepare('DELETE FROM categories WHERE id = ?').run(id).changes > 0;
   });
 }
@@ -289,6 +292,51 @@ export function monthActuals(month) {
         GROUP BY category_id, money_in`
     )
     .all(month);
+}
+
+// Every standing planned amount: { category_id, start_month, amount_cents }.
+// All of them, not one month's: there are only a few per category, and
+// budget.js picks the one that applies to the month on screen.
+export function listBudgetPlans() {
+  return db.prepare('SELECT category_id, start_month, amount_cents FROM budget_plans').all();
+}
+
+// One month's one-off amounts: { category_id, month, amount_cents }.
+export function listBudgetOverrides(month) {
+  return db.prepare('SELECT category_id, month, amount_cents FROM budget_overrides WHERE month = ?').all(month);
+}
+
+// "From this month on, plan this amount." Saved as a standing amount starting
+// in fromMonth (replacing one that already starts there). Because it means
+// "this month and every month after", it also:
+//   - removes standing amounts that start later (they would otherwise win
+//     in those later months), and
+//   - removes this month's own override, so the amount typed is the amount
+//     shown.
+// Overrides in later months are kept: each is a deliberate one-off.
+export function setStandingPlan({ categoryId, fromMonth, amountCents }) {
+  allOrNothing(() => {
+    db.prepare('DELETE FROM budget_plans WHERE category_id = ? AND start_month > ?').run(categoryId, fromMonth);
+    db.prepare('DELETE FROM budget_overrides WHERE category_id = ? AND month = ?').run(categoryId, fromMonth);
+    // "ON CONFLICT ... DO UPDATE": insert, or update the row already there.
+    db.prepare(
+      `INSERT INTO budget_plans (category_id, start_month, amount_cents) VALUES (?, ?, ?)
+       ON CONFLICT (category_id, start_month) DO UPDATE SET amount_cents = excluded.amount_cents`
+    ).run(categoryId, fromMonth, amountCents);
+  });
+}
+
+// "This month only": an amount for one month that beats the standing amount.
+export function setMonthOverride({ categoryId, month, amountCents }) {
+  db.prepare(
+    `INSERT INTO budget_overrides (category_id, month, amount_cents) VALUES (?, ?, ?)
+     ON CONFLICT (category_id, month) DO UPDATE SET amount_cents = excluded.amount_cents`
+  ).run(categoryId, month, amountCents);
+}
+
+// Removes a one-month amount, so the standing amount applies again.
+export function clearMonthOverride(categoryId, month) {
+  db.prepare('DELETE FROM budget_overrides WHERE category_id = ? AND month = ?').run(categoryId, month);
 }
 
 // --- Payees ---

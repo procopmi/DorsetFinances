@@ -78,33 +78,37 @@ test('a current database is left alone', () => {
   assert.equal(backups, 0);
 });
 
+// The made-up steps in the next two tests are numbered after the real ones,
+// so they keep working as real steps are added.
+const NEXT = SCHEMA_VERSION + 1;
+
 test('an older database is backed up once, then upgraded step by step, keeping its rows', () => {
   const conn = new DatabaseSync(':memory:');
-  prepareSchema(conn); // at version 1
+  prepareSchema(conn); // at the current version
   conn.exec("INSERT INTO payees (name) VALUES ('Corner Market')");
 
   const events = [];
   const steps = [
     ...MIGRATIONS,
-    { version: 2, about: 'Add a note column', up: (db) => { events.push('step 2'); db.exec('ALTER TABLE payees ADD COLUMN note TEXT'); } },
-    { version: 3, about: 'Fill notes', up: (db) => { events.push('step 3'); db.exec("UPDATE payees SET note = 'kept'"); } },
+    { version: NEXT, about: 'Add a note column', up: (db) => { events.push('step A'); db.exec('ALTER TABLE payees ADD COLUMN note TEXT'); } },
+    { version: NEXT + 1, about: 'Fill notes', up: (db) => { events.push('step B'); db.exec("UPDATE payees SET note = 'kept'"); } },
   ];
   const result = prepareSchema(conn, { migrations: steps, beforeSchemaChange: () => events.push('backup') });
 
-  assert.deepEqual(events, ['backup', 'step 2', 'step 3']);
-  assert.deepEqual(result, { from: 1, to: 3 });
-  assert.equal(versionOf(conn), 3);
+  assert.deepEqual(events, ['backup', 'step A', 'step B']);
+  assert.deepEqual(result, { from: SCHEMA_VERSION, to: NEXT + 1 });
+  assert.equal(versionOf(conn), NEXT + 1);
   assert.deepEqual(plain(conn.prepare('SELECT name, note FROM payees').all()), [{ name: 'Corner Market', note: 'kept' }]);
 });
 
 test('a failing step leaves the database at the version before it', () => {
   const conn = new DatabaseSync(':memory:');
-  prepareSchema(conn); // at version 1
+  prepareSchema(conn); // at the current version
   const steps = [
     ...MIGRATIONS,
-    { version: 2, about: 'Add a note column', up: (db) => db.exec('ALTER TABLE payees ADD COLUMN note TEXT') },
+    { version: NEXT, about: 'Add a note column', up: (db) => db.exec('ALTER TABLE payees ADD COLUMN note TEXT') },
     {
-      version: 3,
+      version: NEXT + 1,
       about: 'Broken step',
       up: (db) => {
         db.exec('ALTER TABLE payees ADD COLUMN other TEXT'); // undone by the rollback
@@ -113,8 +117,8 @@ test('a failing step leaves the database at the version before it', () => {
     },
   ];
 
-  assert.throws(() => prepareSchema(conn, { migrations: steps }), /version 3 \(Broken step\) failed/);
-  assert.equal(versionOf(conn), 2);
+  assert.throws(() => prepareSchema(conn, { migrations: steps }), new RegExp(`version ${NEXT + 1} \\(Broken step\\) failed`));
+  assert.equal(versionOf(conn), NEXT);
   const columns = conn.prepare('SELECT name FROM pragma_table_info(?)').all('payees').map((c) => c.name);
   assert.ok(columns.includes('note'));
   assert.ok(!columns.includes('other'));

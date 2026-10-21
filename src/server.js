@@ -256,11 +256,40 @@ const apiRoutes = {
     };
   },
 
-  // One month's budget (?month=YYYY-MM): actual income and spending per
-  // category, rolled up by group. The math is in budget.js.
+  // One month's budget (?month=YYYY-MM): planned and actual income and
+  // spending per category, rolled up by group. The math is in budget.js.
   'GET /api/budget': (query) => {
     const month = requireMonth(query.month);
-    return { month, ...buildBudget(db.listCategories(), db.monthActuals(month)) };
+    const plans = { month, plans: db.listBudgetPlans(), overrides: db.listBudgetOverrides(month) };
+    return { month, ...buildBudget(db.listCategories(), db.monthActuals(month), plans) };
+  },
+
+  // Sets one category's planned amount. scope says how far it reaches:
+  //   'standing': this month and later (the usual case);
+  //   'month':    this month only. amountCents null removes this month's
+  //               one-off amount, so the standing amount applies again.
+  'POST /api/budget/set-plan': (body) => {
+    const category = requireCategory(body.categoryId);
+    if (category.parent_id === null) {
+      throw httpError(400, `"${category.name}" is a group; plan its sub-categories instead`);
+    }
+    const month = requireMonth(body.month);
+    if (body.scope === 'month' && body.amountCents === null) {
+      db.clearMonthOverride(category.id, month);
+      return { ok: true };
+    }
+    // A planned amount is how much you expect, so it's never negative.
+    const amountCents = requireCents(body.amountCents);
+    if (amountCents < 0) throw httpError(400, "A planned amount can't be negative");
+
+    if (body.scope === 'standing') {
+      db.setStandingPlan({ categoryId: category.id, fromMonth: month, amountCents });
+    } else if (body.scope === 'month') {
+      db.setMonthOverride({ categoryId: category.id, month, amountCents });
+    } else {
+      throw httpError(400, 'Unknown scope');
+    }
+    return { ok: true };
   },
 
   // Downloads a CSV of one account (?accountId=3) or all accounts

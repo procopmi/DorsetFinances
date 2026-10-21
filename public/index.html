@@ -161,14 +161,26 @@
       <button type="button" id="budget-this-month">This month</button>
     </div>
     <p class="muted">
-      Money that came in and went out this month, by category, from all accounts.
+      Actual is the money that came in and went out this month, by category, from all accounts.
       Refunds lower their category's spending. Transfers between your own accounts aren't counted.
+      Difference is positive when things went better than planned.
     </p>
+    <!-- Planned vs. actual for income, expenses and the net (budget.js). -->
+    <div id="budget-summary" class="budget-summary"></div>
+    <!-- Which months a typed planned amount applies to. A one-month amount
+         is marked • in the table; clear it to go back to the usual amount. -->
+    <fieldset class="budget-scope">
+      <legend>Changes apply to</legend>
+      <label><input type="radio" name="budget-scope" value="standing" checked> this month and later</label>
+      <label><input type="radio" name="budget-scope" value="month"> this month only</label>
+    </fieldset>
     <table class="simple-table budget-table">
       <thead>
         <tr>
           <th>Category</th>
+          <th class="col-money">Planned</th>
           <th class="col-money">Actual</th>
+          <th class="col-money">Difference</th>
         </tr>
       </thead>
       <tbody id="budget-rows"></tbody>
