@@ -17,6 +17,7 @@ import { runningBalances, clearedBalance } from './money.js';
 import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
 import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
+import { buildBudget } from './budget.js';
 
 // --- Input checks ---
 //
@@ -61,6 +62,14 @@ function requireDate(value) {
     // An impossible day like Feb 30 rolls over to Mar 2, so compare back.
     parsed.toISOString().slice(0, 10) === value;
   if (!isRealDate) throw httpError(400, `"${value}" is not a valid date`);
+  return value;
+}
+
+// 'YYYY-MM', a month that exists (01 to 12), as used by the Budget screen.
+function requireMonth(value) {
+  if (typeof value !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
+    throw httpError(400, `"${value}" is not a valid month`);
+  }
   return value;
 }
 
@@ -245,6 +254,13 @@ const apiRoutes = {
       clearedBalanceCents: clearedBalance(account.opening_balance_cents, rows),
       rows: rows.map((row, i) => ({ ...row, balance_cents: balances[i] })),
     };
+  },
+
+  // One month's budget (?month=YYYY-MM): actual income and spending per
+  // category, rolled up by group. The math is in budget.js.
+  'GET /api/budget': (query) => {
+    const month = requireMonth(query.month);
+    return { month, ...buildBudget(db.listCategories(), db.monthActuals(month)) };
   },
 
   // Downloads a CSV of one account (?accountId=3) or all accounts

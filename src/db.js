@@ -265,6 +265,32 @@ export function deleteCategory(id) {
   });
 }
 
+// --- Budget ---
+
+// One month's money per category, for the Budget screen. month is 'YYYY-MM';
+// dates are 'YYYY-MM-DD' text, so the first 7 characters are the month.
+// Every account counts (closed ones too: it's still history), and cleared
+// status doesn't matter. Transfers are left out: they only move money
+// between your own accounts, so they're neither income nor spending.
+//
+// Grouped by category AND by direction (money in or out), so uncategorized
+// rows can be shown as "came in" and "went out" separately. For a real
+// category the two are simply added back together (see budget.js), so a
+// refund still lowers that category's spending.
+// Returns rows of { category_id (null = uncategorized), money_in (1 or 0),
+// total_cents, count }.
+export function monthActuals(month) {
+  return db
+    .prepare(
+      `SELECT category_id, amount_cents > 0 AS money_in,
+              SUM(amount_cents) AS total_cents, COUNT(*) AS count
+         FROM transactions
+        WHERE substr(date, 1, 7) = ? AND transfer_id IS NULL
+        GROUP BY category_id, money_in`
+    )
+    .all(month);
+}
+
 // --- Payees ---
 
 // Payees for autocomplete, alphabetically, with the category to fill in

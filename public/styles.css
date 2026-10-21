@@ -67,6 +67,40 @@ body {
   font-weight: 600;
 }
 
+/* --- Budget screen --- */
+
+.budget-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-header h2 {
+  margin: 0;
+  min-width: 180px;
+  text-align: center;
+}
+
+.budget-table .section-row td {
+  font-weight: 600;
+  font-size: 15px;
+  padding-top: 14px;
+}
+
+.budget-table .group-row td {
+  font-weight: 600;
+  background: var(--header-bg);
+}
+
+.budget-table .sub-row td:first-child {
+  padding-left: 24px;
+}
+
+.budget-table .total-row td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+}
+
 /* --- Categories and Payees screens --- */
 
 .screen {

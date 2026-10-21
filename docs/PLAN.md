@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-19, after milestone 13. **Phase 1 is complete.** See §6 for what's next and §7 for open decisions.
+Last updated 2026-10-21, during phase 2 (milestone 14a). **Phase 1 is complete and your real data is live.** See §5 "Budget" for the phase 2 design, §6 for progress and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 79 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 88 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -43,15 +43,16 @@ src/
   schema.sql          the full, current table definitions (for brand-new databases)
   migrations.js       upgrade steps for older databases (imported only by db.js)
   money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
+  budget.js           the Budget screen's math (actuals per category, group and section totals)
   csv.js              CSV export and bank-file parsing
   rules.js            payee-rule matching and pattern suggestion
   default-categories.js  the approved category list as data
   backup.js           timestamped backups (VACUUM INTO)
   server.js           routes, input checks, request guard
 public/               index.html, styles.css, main.js (screen switcher), api.js (shared helpers),
-                      register.js, categories.js, payees.js, import.js
+                      register.js, budget.js, categories.js, payees.js, import.js
 scripts/              seed-sample.js, setup-real.js, backup.js
-test/                 money, balances, transfers, csv, rules, import
+test/                 money, balances, transfers, csv, rules, import, reapply, schema, budget
 sample-data/          sample.db and backups/ (generated, gitignored)
 ```
 
@@ -201,6 +202,24 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 - **(recap)** The hand-entry match also finds the uncleared half of a transfer you entered yourself.
 - **(recap)** Each existing row can be matched only once per file.
 
+### Budget (phase 2, planned 2026-10-21)
+- **Your answers to the model questions:**
+  - **Simple monthly** budget, with no carryover: each month starts fresh. Envelopes stay possible later.
+  - **Standing amount + overrides.** A monthly amount is set once and applies to every month until you change it. Any single month can be overridden.
+  - **Income is budgeted too**, planned vs. actual, so the screen shows a planned net and an actual net.
+  - **Recurring / other flag** per category, with subtotals (the idea from your old spreadsheet).
+- **How "actual" is counted (proposed in the plan, approved with it):**
+  - Transactions in a sub-category dated in that month, from **all accounts** (closed ones included), whatever their cleared status.
+  - **Both sections show positive numbers:** income is money in, expenses are money spent. A refund lowers its category's spending.
+  - **Transfers are left out.** A card charge counts when charged, and the card payment is a transfer.
+  - **Uncategorized** rows show as their own line in each section (money in under Income, money out under Expenses), so the totals match the registers.
+  - Hidden categories appear only in a month where they have money (or, from 14b, a plan).
+- **Planned amounts (14b):**
+  - Stored as whole positive cents. Standing amounts have a start month, so a change from June on doesn't rewrite earlier months.
+  - A toggle chooses whether an edit applies to "this month and later" (the default) or "this month only".
+  - Difference column: positive is good in both sections (expenses: planned − actual; income: actual − planned).
+- **Schema plan:** v2 adds `budget_plans` (category, start month, amount) and `budget_overrides` (category, month, amount). v3 adds `categories.is_recurring`. Your real database is backed up and upgraded automatically on the first `npm start` after each.
+
 ## 6. Milestones
 
 | # | Milestone | Status | Commit |
@@ -225,31 +244,24 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 11c | Amount rule per payee; backup before a new table is added | Done | `84a15c6` |
 | 12a | Versioned schema upgrades (`user_version` + upgrade steps) | Done | `f745df4` |
 | 12b | Amount rule fills the category in register entry | Done | `d8a970a` |
-| 13 | Apply rules to uncategorized imported rows (Payees screen) | Done | (this commit) |
-| — | **Your real-data setup:** create `.env`, run `npm run setup`, add accounts, first import | **Not started, as far as I know.** It's yours to do; I can't see `~/FinanceData` | — |
-| Phase 2 | Budget: monthly planned vs. actual per category | Not started | — |
+| 13 | Apply rules to uncategorized imported rows (Payees screen) | Done | `1530725` |
+| — | **Your real-data setup:** `.env`, `npm run setup`, 6 accounts, categories, imports and rules | Done by you (reported 2026-10-21; some cleanup still going on) | — |
+| 14a | Budget screen, read-only: actuals per category by month | Done | (this commit) |
+| 14b | Planned amounts: standing + overrides, Difference column, summary (schema v2) | Next | — |
+| 14c | Recurring flag and subtotals (schema v3) | Planned | — |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
 
 ### What's next
-1. **You: switch on your real data.**
-   - Run `mkdir -p ~/FinanceData`.
-   - Run `cp .env.example .env` and set `FINANCE_DB=/Users/michaelprocopio/FinanceData/finance.db` in it.
-   - Run `npm run setup`, then `npm start`.
-   - Add your accounts with their opening balances, then import your first Chase downloads.
-
-   Using the app on real data before phase 2 will show what's missing (splits, card display, rule types) better than guessing.
-2. **Phase 2 (budget).** It starts with a plan for you to approve, covering the budget model (§7, item 1). Nothing gets built before that.
+1. **14b: planned amounts** (see §5 "Budget"). This will upgrade your real database to schema v2 on the next `npm start` after it's committed, with a backup first.
+2. Then 14c (recurring flag), then phase 3.
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 
 ## 7. Open questions and pending decisions
 
-Items 1 and 2 block phase 2. Items 3–5 can wait until real use shows whether they matter.
+Items 3–5 can wait until real use shows whether they matter.
 
-1. **Phase 2 budget model.**
-   - CLAUDE.md says to start simple and raise envelope budgeting if it seems worth it.
-   - Still to decide: the basic model, how income categories are handled, and whether unspent budget carries over.
-   - Your old spreadsheet split items into "recurring" and "other". We agreed that idea could come back as a **budget flag**, not as a category.
+1. ~~**Phase 2 budget model.**~~ **Settled 2026-10-21:** simple monthly, no carryover, standing amounts with overrides, income budgeted, recurring flag. See §5 "Budget".
 2. ~~**How future schema changes reach your real database.**~~ **Settled in milestone 12a:**
    - Each database file records its schema version in SQLite's `user_version`. Every file made before 12a is at version 0; the current version is 1.
    - **On opening** (`openDb` → `prepareSchema` in `db.js`):

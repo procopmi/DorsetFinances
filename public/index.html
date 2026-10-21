@@ -20,6 +20,7 @@
     <!-- Screen switcher (see main.js). -->
     <nav class="screen-nav">
       <button type="button" data-screen="register">Register</button>
+      <button type="button" data-screen="budget">Budget</button>
       <button type="button" data-screen="categories">Categories</button>
       <button type="button" data-screen="payees">Payees</button>
     </nav>
@@ -149,6 +150,29 @@
       <datalist id="payee-options"></datalist>
       <datalist id="category-options"></datalist>
     </section>
+  </main>
+
+  <!-- ===== Budget screen (budget.js) ===== -->
+  <main id="budget-view" class="screen" hidden>
+    <div class="budget-header">
+      <button type="button" id="budget-prev" title="Previous month">‹</button>
+      <h2 id="budget-month"></h2>
+      <button type="button" id="budget-next" title="Next month">›</button>
+      <button type="button" id="budget-this-month">This month</button>
+    </div>
+    <p class="muted">
+      Money that came in and went out this month, by category, from all accounts.
+      Refunds lower their category's spending. Transfers between your own accounts aren't counted.
+    </p>
+    <table class="simple-table budget-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th class="col-money">Actual</th>
+        </tr>
+      </thead>
+      <tbody id="budget-rows"></tbody>
+    </table>
   </main>
 
   <!-- ===== Categories screen (categories.js) ===== -->
