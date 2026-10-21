@@ -269,3 +269,35 @@ test('a refused category delete keeps its budget amounts', () => {
   assert.equal(db.listBudgetPlans().length, 1);
   assert.equal(db.listBudgetOverrides('2026-03').length, 1);
 });
+
+// --- Recurring vs. other ---
+
+test('recurring and other expense subtotals add up to the expenses total', () => {
+  const housing = db.createCategory({ name: 'Housing', kind: 'expense' });
+  const mortgage = db.createCategory({ name: 'Mortgage', kind: 'expense', parentId: housing });
+  db.setCategoryRecurring(mortgage, true);
+  plan(mortgage, '2026-01', 140000);
+  plan(groceries, '2026-01', 50000);
+  add(checking, '2026-03-01', -140000, mortgage);
+  add(card, '2026-03-05', -45000, groceries);
+  add(checking, '2026-03-07', -1000); // uncategorized: counted as other
+
+  const { expenses } = budgetFor('2026-03');
+  assert.equal(subLine(expenses, mortgage).isRecurring, true);
+  assert.equal(subLine(expenses, groceries).isRecurring, false);
+  assert.deepEqual(expenses.recurring, { plannedCents: 140000, actualCents: 140000, differenceCents: 0 });
+  assert.deepEqual(expenses.other, { plannedCents: 50000, actualCents: 46000, differenceCents: 4000 });
+  for (const field of ['plannedCents', 'actualCents', 'differenceCents']) {
+    assert.equal(expenses.recurring[field] + expenses.other[field], expenses[field]);
+  }
+});
+
+test('unticking recurring moves a category back to other', () => {
+  db.setCategoryRecurring(groceries, true);
+  add(card, '2026-03-05', -45000, groceries);
+  assert.equal(budgetFor('2026-03').expenses.recurring.actualCents, 45000);
+
+  db.setCategoryRecurring(groceries, false);
+  assert.equal(budgetFor('2026-03').expenses.recurring.actualCents, 0);
+  assert.equal(budgetFor('2026-03').expenses.other.actualCents, 45000);
+});

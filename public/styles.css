@@ -101,6 +101,18 @@ body {
   border-top: 2px solid var(--border);
 }
 
+.budget-table .col-clr {
+  text-align: center;
+}
+
+.budget-table .subtotal-row td {
+  color: var(--muted);
+}
+
+.budget-table .subtotal-row td:first-child {
+  padding-left: 24px;
+}
+
 .budget-summary {
   display: flex;
   gap: 24px;

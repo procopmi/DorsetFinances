@@ -618,6 +618,15 @@ const apiRoutes = {
     return { ok: true };
   },
 
+  // The recurring/other flag, used by the Budget screen's subtotals. Only
+  // subs carry it, since only subs have planned amounts.
+  'POST /api/categories/set-recurring': (body) => {
+    const category = requireCategory(body.id);
+    if (category.parent_id === null) throw httpError(400, `"${category.name}" is a group; mark its sub-categories instead`);
+    db.setCategoryRecurring(category.id, body.isRecurring === true);
+    return { ok: true };
+  },
+
   'POST /api/categories/move': (body) => {
     const category = requireCategory(body.id);
     if (category.parent_id === null) throw httpError(400, 'Only sub-categories can be moved');

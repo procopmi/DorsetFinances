@@ -43,11 +43,11 @@ export function plannedFor(categoryId, month, plans, overrides) {
 // plans, overrides: db.listBudgetPlans() and db.listBudgetOverrides(month).
 // Returns {
 //   income:   { groups, uncategorized: { cents, count, differenceCents }, plannedCents, actualCents, differenceCents },
-//   expenses: { same shape },
+//   expenses: { same shape, plus recurring and other: { plannedCents, actualCents, differenceCents } },
 //   plannedNetCents, actualNetCents   (income minus expenses)
 // }
 // where each group is { id, name, plannedCents, actualCents, differenceCents,
-// subs: [{ id, name, isHidden, plannedCents, isOverride, actualCents, differenceCents }] }.
+// subs: [{ id, name, isHidden, isRecurring, plannedCents, isOverride, actualCents, differenceCents }] }.
 export function buildBudget(categories, actualRows, { month, plans, overrides }) {
   // Signed register total per category id, refunds and charges added together.
   const signedByCategory = new Map();
@@ -70,6 +70,19 @@ export function buildBudget(categories, actualRows, { month, plans, overrides })
   const planOf = (id) => plannedFor(id, month, plans, overrides);
   const income = buildSection(categories, 'income', signedByCategory, planOf, uncategorizedIn);
   const expenses = buildSection(categories, 'expense', signedByCategory, planOf, uncategorizedOut);
+
+  // Expenses split into recurring bills and everything else. Uncategorized
+  // spending isn't known to be a bill, so it counts as "other"; that way the
+  // two subtotals always add up to the expenses total.
+  const subs = expenses.groups.flatMap((g) => g.subs);
+  const subtotal = (items, extraActualCents) => {
+    const plannedCents = sum(items, 'plannedCents');
+    const actualCents = sum(items, 'actualCents') + extraActualCents;
+    return { plannedCents, actualCents, differenceCents: plannedCents - actualCents };
+  };
+  expenses.recurring = subtotal(subs.filter((sub) => sub.isRecurring), 0);
+  expenses.other = subtotal(subs.filter((sub) => !sub.isRecurring), expenses.uncategorized.cents);
+
   return {
     income,
     expenses,
@@ -99,6 +112,7 @@ function buildSection(categories, kind, signedByCategory, planOf, uncategorized)
             id: sub.id,
             name: sub.name,
             isHidden: Boolean(sub.is_hidden || group.is_hidden),
+            isRecurring: Boolean(sub.is_recurring),
             plannedCents: planned.cents,
             isOverride: planned.isOverride,
             actualCents,

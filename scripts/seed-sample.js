@@ -129,6 +129,11 @@ for (const [label, amountCents] of Object.entries(samplePlans)) {
 }
 db.setMonthOverride({ categoryId: categoryIds.get('Food: Dining Out'), month: '2026-02', amountCents: 15000 });
 
+// Regular bills, for the Budget screen's "recurring" subtotal.
+for (const label of ['Housing: Mortgage', 'Utilities: Electric', 'Utilities: Water', 'Subscriptions: Streaming & Media']) {
+  db.setCategoryRecurring(categoryIds.get(label), true);
+}
+
 console.log(
   `Sample database rebuilt at ${dbPath} with ${sampleAccounts.length} accounts, ` +
     `${categoryIds.size} categories and ${sampleTransactions.length} transactions.`

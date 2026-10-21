@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-21, during phase 2 (milestone 14b). **Phase 1 is complete and your real data is live.** See §5 "Budget" for the phase 2 design, §6 for progress and §7 for open decisions.
+Last updated 2026-10-21, after milestone 14c. **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" for the phase 2 design, §6 for progress and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 100 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 102 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -82,7 +82,7 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | Table | Key points |
 |---|---|
 | `accounts` | `type`: checking / savings / credit_card / investment. Also `opening_balance_cents`, `opening_date`, `is_closed` (hides the account and makes it read-only, keeping its history) and `sort_order` |
-| `categories` | One table, two levels: `parent_id` NULL = group, set = sub. `kind` income/expense, `is_hidden`, `sort_order`, names `UNIQUE(parent_id, name)` |
+| `categories` | One table, two levels: `parent_id` NULL = group, set = sub. `kind` income/expense, `is_hidden`, `sort_order`, `is_recurring` (14c, schema v3), names `UNIQUE(parent_id, name)` |
 | `payees` | `name` unique, ignoring capitals; `default_category_id`; `is_hidden` |
 | `payee_rules` | `match_type` contains / starts_with / exact, `pattern`, `payee_id`. Plain text, no regex |
 | `payee_amount_rules` | (milestone 11c) One per payee: `threshold_cents`, `below_category_id`, `otherwise_category_id`. Under the threshold (by size, sign ignored) → first category, otherwise → second |
@@ -225,6 +225,11 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **(recap)** Uncategorized money has no plan, so it counts in full against the Difference.
   - **(recap)** Typing: Enter saves and moves to the next category, Tab saves, Esc puts the saved amount back. Nothing planned shows as an empty box, and a one-off is shown in italics with a •.
   - Deleting a category deletes its budget amounts in the same step; the confirm message says so.
+- **Recurring flag (14c):**
+  - A Recurring tickbox on each expense sub, saved straight away.
+  - "Recurring expenses" and "Other expenses" subtotal rows sit under the expenses total, and both are also in the summary strip.
+  - **(recap)** Uncategorized spending counts as "other", so the two subtotals always add up to the total.
+  - **(recap)** Only subs carry the flag, and only expense subs show the tickbox.
 - **Schema plan:** v2 adds `budget_plans` (category, start month, amount) and `budget_overrides` (category, month, amount). v3 adds `categories.is_recurring`. Your real database is backed up and upgraded automatically on the first `npm start` after each.
 
 ## 6. Milestones
@@ -254,13 +259,13 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 13 | Apply rules to uncategorized imported rows (Payees screen) | Done | `1530725` |
 | — | **Your real-data setup:** `.env`, `npm run setup`, 6 accounts, categories, imports and rules | Done by you (reported 2026-10-21; some cleanup still going on) | — |
 | 14a | Budget screen, read-only: actuals per category by month | Done | `3d00613` |
-| 14b | Planned amounts: standing + overrides, Difference column, summary (schema v2) | Done | (this commit) |
-| 14c | Recurring flag and subtotals (schema v3) | Next | — |
+| 14b | Planned amounts: standing + overrides, Difference column, summary (schema v2) | Done | `ba1d97c` |
+| 14c | Recurring flag and subtotals (schema v3) | Done | (this commit) |
 | Phase 3 | Reports and dashboard: spending by category | Not started | — |
 
 ### What's next
-1. **Your next `npm start` upgrades your real database to schema v2** (two new, empty budget tables), after a `…-upgrade.db` backup. It was tested on a copy of a v1 sample database.
-2. **14c: recurring flag** (schema v3), then phase 3.
+1. **Your next `npm start` upgrades your real database to schema v3** after a `…-upgrade.db` backup: from v1 (if you haven't started it since 14b) it runs both steps in one go. Both steps were tested on copies of a sample database.
+2. **Use the budget on real data for a while**, then **phase 3 (reports and dashboard)**, which starts with a plan for you to approve.
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 
@@ -270,7 +275,7 @@ Items 3–5 can wait until real use shows whether they matter.
 
 1. ~~**Phase 2 budget model.**~~ **Settled 2026-10-21:** simple monthly, no carryover, standing amounts with overrides, income budgeted, recurring flag. See §5 "Budget".
 2. ~~**How future schema changes reach your real database.**~~ **Settled in milestone 12a:**
-   - Each database file records its schema version in SQLite's `user_version`. Every file made before 12a is at version 0. Version 1 added amount rules, and version 2 (14b) the budget tables. The current version is 2.
+   - Each database file records its schema version in SQLite's `user_version`. Every file made before 12a is at version 0. Version 1 added amount rules, version 2 (14b) the budget tables, and version 3 (14c) the recurring flag. The current version is 3.
    - **On opening** (`openDb` → `prepareSchema` in `db.js`):
      - a file newer than the app is refused, unchanged;
      - an empty file is built from `schema.sql` and stamped as current;

@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS categories (
   kind        TEXT    NOT NULL CHECK (kind IN ('income', 'expense')),
   is_hidden   INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
+  -- 1 = a regular bill (mortgage, utilities, subscriptions), for the Budget
+  -- screen's "recurring" vs. "other" subtotals. Added as upgrade step 3,
+  -- which adds it at the end, so it stays last here too.
+  is_recurring INTEGER NOT NULL DEFAULT 0,
   UNIQUE (parent_id, name)
 ) STRICT;
 

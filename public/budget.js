@@ -8,6 +8,9 @@
 // category, like a spreadsheet) or Tab. Esc puts back the saved amount.
 // The "Changes apply to" choice above the table says whether it's the usual
 // amount from this month on, or a one-off for this month only.
+//
+// The Recurring tickbox (expense categories only) marks regular bills, which
+// get their own subtotal below the expenses total.
 
 import { byId, getJson, postJson, runAction } from '/api.js';
 import { formatCents, parseDollarsToCents } from '/money.js';
@@ -74,6 +77,8 @@ function showSummary(budget) {
   byId('budget-summary').replaceChildren(
     item('Income', budget.income.plannedCents, budget.income.actualCents),
     item('Expenses', budget.expenses.plannedCents, budget.expenses.actualCents),
+    item('Recurring', budget.expenses.recurring.plannedCents, budget.expenses.recurring.actualCents),
+    item('Other', budget.expenses.other.plannedCents, budget.expenses.other.actualCents),
     item('Net', budget.plannedNetCents, budget.actualNetCents)
   );
 }
@@ -87,7 +92,8 @@ function sectionRows(title, section) {
     for (const sub of group.subs) {
       const name = sub.isHidden ? `${sub.name} (hidden)` : sub.name;
       const subRow = row(name, 'sub-row', null, sub.actualCents, sub.differenceCents);
-      subRow.children[1].append(...planInput(sub));
+      if (title === 'Expenses') subRow.children[1].append(recurringBox(sub));
+      subRow.children[2].append(...planInput(sub));
       subRow.classList.toggle('muted', sub.isHidden);
       rows.push(subRow);
     }
@@ -101,10 +107,17 @@ function sectionRows(title, section) {
   rows.push(
     row(`Total ${title.toLowerCase()}`, 'total-row', section.plannedCents, section.actualCents, section.differenceCents)
   );
+  // Recurring bills vs. everything else (uncategorized counts as other).
+  if (section.recurring) {
+    for (const [label, part] of [['Recurring expenses', section.recurring], ['Other expenses', section.other]]) {
+      rows.push(row(label, 'subtotal-row', part.plannedCents, part.actualCents, part.differenceCents));
+    }
+  }
   return rows;
 }
 
-// One table row: a label and three amounts (null leaves a cell blank).
+// One table row: a label, an empty Recurring cell (sectionRows fills it on
+// expense subs) and three amounts (null leaves a cell blank).
 // A negative amount is red: overspent, short of planned income, or a
 // category with more refunds than spending.
 function row(label, className, plannedCents, actualCents, differenceCents) {
@@ -114,7 +127,9 @@ function row(label, className, plannedCents, actualCents, differenceCents) {
   const name = document.createElement('td');
   // textContent (not innerHTML) so a name is always plain text, never HTML.
   name.textContent = label;
-  tr.append(name);
+  const recurring = document.createElement('td');
+  recurring.className = 'col-clr';
+  tr.append(name, recurring);
 
   for (const cents of [plannedCents, actualCents, differenceCents]) {
     const amount = document.createElement('td');
@@ -126,6 +141,23 @@ function row(label, className, plannedCents, actualCents, differenceCents) {
     tr.append(amount);
   }
   return tr;
+}
+
+// --- Recurring tickbox ---
+
+// Saved as soon as it's ticked; easy to undo, so it doesn't ask first.
+function recurringBox(sub) {
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = sub.isRecurring;
+  box.setAttribute('aria-label', `${sub.name} is a recurring bill`);
+  box.addEventListener('change', () =>
+    runAction(async () => {
+      await postJson('/api/categories/set-recurring', { id: sub.id, isRecurring: box.checked });
+      await show();
+    })
+  );
+  return box;
 }
 
 // --- Typing planned amounts ---

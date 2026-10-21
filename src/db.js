@@ -180,7 +180,7 @@ function allOrNothing(work) {
 export function listCategories() {
   return db
     .prepare(
-      `SELECT id, name, parent_id, kind, is_hidden, sort_order
+      `SELECT id, name, parent_id, kind, is_hidden, sort_order, is_recurring
          FROM categories
         ORDER BY sort_order, id`
     )
@@ -229,6 +229,14 @@ export function renameCategory(id, name) {
 export function setCategoryHidden(id, isHidden) {
   return (
     db.prepare('UPDATE categories SET is_hidden = ? WHERE id = ?').run(isHidden ? 1 : 0, id).changes > 0
+  );
+}
+
+// Marks a sub as a recurring bill (or back to "other"), for the Budget
+// screen's subtotals.
+export function setCategoryRecurring(id, isRecurring) {
+  return (
+    db.prepare('UPDATE categories SET is_recurring = ? WHERE id = ?').run(isRecurring ? 1 : 0, id).changes > 0
   );
 }
 

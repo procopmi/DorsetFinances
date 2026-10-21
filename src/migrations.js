@@ -66,4 +66,13 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    // Milestone 14c: the recurring/other flag on categories. Every existing
+    // category starts as "other" (0); no other value changes.
+    version: 3,
+    about: 'Recurring flag on categories',
+    up(db) {
+      db.exec('ALTER TABLE categories ADD COLUMN is_recurring INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
