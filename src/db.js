@@ -303,6 +303,20 @@ export function actualsBetween(from, to) {
     .all(from, to);
 }
 
+// Like actualsBetween, but split by month as well, for the trend report:
+// rows of { month ('YYYY-MM'), category_id, money_in, total_cents, count }.
+export function monthlyActualsBetween(from, to) {
+  return db
+    .prepare(
+      `SELECT substr(date, 1, 7) AS month, category_id, amount_cents > 0 AS money_in,
+              SUM(amount_cents) AS total_cents, COUNT(*) AS count
+         FROM transactions
+        WHERE date BETWEEN ? AND ? AND transfer_id IS NULL
+        GROUP BY month, category_id, money_in`
+    )
+    .all(from, to);
+}
+
 // The transactions behind one amount on the Budget screen or a report
 // ("drill-down"), oldest first, from every account. Pick them by either:
 //   categoryIds:   one sub, or every sub of a group;

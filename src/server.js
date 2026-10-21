@@ -18,8 +18,8 @@ import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
 import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
 import { buildBudget } from './budget.js';
-import { spendingByCategory } from './reports.js';
-import { monthRange } from './periods.js';
+import { spendingByCategory, monthlyTrend } from './reports.js';
+import { monthRange, monthsBetween } from './periods.js';
 
 // --- Input checks ---
 //
@@ -282,6 +282,15 @@ const apiRoutes = {
   'GET /api/reports/spending': (query) => {
     const { from, to } = requireRange(query);
     return { from, to, ...spendingByCategory(db.listCategories(), db.actualsBetween(from, to)) };
+  },
+
+  // Spending per month over a date range: categories down, months across.
+  // Capped at 36 months so the grid stays readable.
+  'GET /api/reports/trend': (query) => {
+    const { from, to } = requireRange(query);
+    const months = monthsBetween(from, to);
+    if (months.length > 36) throw httpError(400, `That's ${months.length} months; the trend shows up to 36`);
+    return { from, to, ...monthlyTrend(db.listCategories(), db.monthlyActualsBetween(from, to), months) };
   },
 
   // The transactions behind one amount (drill-down), for ?from=...&to=...

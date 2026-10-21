@@ -1,6 +1,6 @@
 # Dorset Finances: Plan and Decisions
 
-Last updated 2026-10-21, during phase 3 (milestone 15b). **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" and "Reports" for the phase 2 and 3 designs, §6 for progress and §7 for open decisions.
+Last updated 2026-10-21, during phase 3 (milestone 15c). **Phases 1 and 2 are complete, and your real data is live.** See §5 "Budget" and "Reports" for the phase 2 and 3 designs, §6 for progress and §7 for open decisions.
 
 This file collects what was planned and agreed in chat, so the decisions don't live only in conversation history. `CLAUDE.md` holds the project rules. This file holds the design that grew from them.
 
@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 119 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 126 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -44,7 +44,7 @@ src/
   migrations.js       upgrade steps for older databases (imported only by db.js)
   money.js            cents parsing/formatting, running and cleared balances (shared with the browser)
   budget.js           the Budget screen's math (actuals per category, group and section totals)
-  reports.js          the Reports screen's math (spending by category)
+  reports.js          the Reports screen's math (spending by category, monthly trend)
   periods.js          report date ranges: preset buttons, a month's first/last day (shared with the browser)
   csv.js              CSV export and bank-file parsing
   rules.js            payee-rule matching and pattern suggestion
@@ -250,6 +250,14 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **(recap)** It opens in a box over the page (the browser's `<dialog>`). Esc or Close shuts it.
   - **(recap)** Rows show register signs (money out negative), and the total uses the screen's sign (spending positive).
   - **(recap)** Totals, subtotals and Planned/Difference amounts aren't clickable.
+- **Monthly trend (15c):**
+  - The Reports tab now has a switch: Spending by category | Monthly trend. Both share the period picker and the opened groups.
+  - A grid of expense groups (open one for its subs) × months, with Total and Average columns. Uncategorized and Total spending rows sit at the bottom.
+  - Each month's column is that month's Spending report (it's built with the same function), and the grid total equals the Spending report's.
+  - Click a month's amount to list that month's transactions, or a Total to list the whole period's.
+  - **(recap)** Partial months: a period that starts or ends mid-month (like Year to date) only counts the days inside it. A month cell's drill-down uses the same days.
+  - **(recap)** Average = total ÷ the number of months shown, rounded to the cent. An empty or partial month pulls it down, and the screen says so. Averages aren't clickable.
+  - **(recap)** Months with nothing are blank. Up to 36 months; a longer range is refused with a message.
 - **(recap) Period presets:**
   - "This month" is the whole month (it includes post-dated entries).
   - "Year to date" ends today.
@@ -285,13 +293,13 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 14b | Planned amounts: standing + overrides, Difference column, summary (schema v2) | Done | `ba1d97c` |
 | 14c | Recurring flag and subtotals (schema v3) | Done | `5c1a9e2` |
 | 15a | Reports screen, period picker, Spending by category | Done | `451882c` |
-| 15b | Drill-down: click an amount to list its transactions (reports and Budget) | Done | (this commit) |
-| 15c | Monthly trend | Next | — |
-| 15d | Income vs. expenses (cash flow) | Planned | — |
+| 15b | Drill-down: click an amount to list its transactions (reports and Budget) | Done | `9ef0efb` |
+| 15c | Monthly trend | Done | (this commit) |
+| 15d | Income vs. expenses (cash flow) | Next | — |
 | 15e | Dashboard | Planned | — |
 
 ### What's next
-1. **15c: monthly trend**, then 15d and 15e (see the table above). Phase 3 doesn't change the schema, so your real database stays at v3.
+1. **15d: income vs. expenses**, then 15e (see the table above). Phase 3 doesn't change the schema, so your real database stays at v3.
 
 **Browser testing:** I checked every milestone through the API and the tests, but **I have never clicked through the page myself**. Each recap listed browser steps for you to try. Apart from "Payee entering is fine for now", I don't know which ones you ran.
 

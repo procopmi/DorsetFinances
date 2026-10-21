@@ -28,6 +28,25 @@ function shiftMonth(month, count) {
   return `${Math.floor(index / 12)}-${pad((index % 12) + 1)}`;
 }
 
+// Every month a range touches, in order, as 'YYYY-MM' (the first and last
+// can be partial): monthsBetween('2025-11-15', '2026-02-03')
+//   -> ['2025-11', '2025-12', '2026-01', '2026-02'].
+export function monthsBetween(from, to) {
+  const months = [];
+  for (let month = from.slice(0, 7); month <= to.slice(0, 7); month = shiftMonth(month, 1)) {
+    months.push(month);
+  }
+  return months;
+}
+
+// The part of a month that lies inside a range, e.g. October cut off at
+// today for "Year to date". A trend cell's transactions are listed for this
+// range, so they match the cell.
+export function monthWithin(month, from, to) {
+  const whole = monthRange(month);
+  return { from: whole.from > from ? whole.from : from, to: whole.to < to ? whole.to : to };
+}
+
 // Today in local time, as 'YYYY-MM-DD'.
 export function todayText(now = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;

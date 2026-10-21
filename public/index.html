@@ -191,8 +191,13 @@
   </main>
 
   <!-- ===== Reports screen (reports.js) ===== -->
-  <main id="reports-view" class="screen" hidden>
-    <h2>Spending by category</h2>
+  <main id="reports-view" class="screen reports-screen" hidden>
+    <h2>Reports</h2>
+    <!-- Which report; all of them use the period below. -->
+    <nav class="report-views">
+      <button type="button" data-view="spending">Spending by category</button>
+      <button type="button" data-view="trend">Monthly trend</button>
+    </nav>
     <!-- The period: a preset button, or your own From/To dates (both included). -->
     <div class="period-picker">
       <button type="button" data-preset="this-month">This month</button>
@@ -205,19 +210,37 @@
     </div>
     <p class="muted">
       Money spent in the period, from all accounts. Refunds lower their category's spending, and
-      transfers between your own accounts aren't counted. Click a group to see its sub-categories.
+      transfers between your own accounts aren't counted. Click a group's name to see its
+      sub-categories, or an amount to see its transactions.
     </p>
-    <table class="simple-table spending-table">
-      <thead>
-        <tr>
-          <th>Category</th>
-          <th class="col-bar"></th>
-          <th class="col-money">Spent</th>
-          <th class="col-money">Share</th>
-        </tr>
-      </thead>
-      <tbody id="spending-rows"></tbody>
-    </table>
+
+    <section id="spending-report">
+      <table class="simple-table spending-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th class="col-bar"></th>
+            <th class="col-money">Spent</th>
+            <th class="col-money">Share</th>
+          </tr>
+        </thead>
+        <tbody id="spending-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="trend-report" hidden>
+      <p class="muted">
+        One column per month. Average is the total divided by the number of months shown,
+        so a month that's only partly in the period (like this one) pulls it down.
+      </p>
+      <!-- Scrolls sideways when there are many months. -->
+      <div class="table-scroll">
+        <table class="simple-table trend-table">
+          <thead><tr id="trend-head"></tr></thead>
+          <tbody id="trend-rows"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <!-- ===== Categories screen (categories.js) ===== -->

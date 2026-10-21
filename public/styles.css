@@ -155,6 +155,49 @@ body {
 
 /* --- Reports screen --- */
 
+/* Wider than the other screens, so the trend grid has room for its months. */
+.reports-screen {
+  max-width: 1400px;
+}
+
+.report-views {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.report-views button[aria-pressed="true"] {
+  border-color: var(--focus);
+  font-weight: 600;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.trend-table td,
+.trend-table th {
+  white-space: nowrap;
+}
+
+.trend-table .group-row td,
+.trend-table .total-row td {
+  font-weight: 600;
+}
+
+.trend-table .total-row td {
+  border-top: 2px solid var(--border);
+}
+
+.trend-table .sub-row td:first-child {
+  padding-left: 28px;
+}
+
+/* Total and Average columns set apart from the months. */
+.trend-table .col-summary {
+  border-left: 2px solid var(--border);
+}
+
 .period-picker {
   display: flex;
   flex-wrap: wrap;

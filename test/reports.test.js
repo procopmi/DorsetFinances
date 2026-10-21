@@ -8,7 +8,8 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as db from '../src/db.js';
-import { spendingByCategory } from '../src/reports.js';
+import { spendingByCategory, monthlyTrend } from '../src/reports.js';
+import { monthsBetween } from '../src/periods.js';
 
 let checking;
 let card;
@@ -167,4 +168,60 @@ test('listed rows carry what the list shows: date, account, payee, category, mem
   assert.equal(row.payee, 'Someone');
   assert.equal(row.category, 'Food: Groceries');
   assert.equal(row.amount_cents, -1234);
+});
+
+// --- Monthly trend ---
+
+const trend = (from, to) =>
+  monthlyTrend(db.listCategories(), db.monthlyActualsBetween(from, to), monthsBetween(from, to));
+
+test('each month gets its own column; a month with nothing shows 0', () => {
+  add(card, '2026-01-31', -10000, groceries);
+  add(card, '2026-03-01', -20000, groceries);
+  add(card, '2026-03-15', 5000, groceries); // refund in March
+
+  const report = trend('2026-01-01', '2026-03-31');
+  assert.deepEqual(report.months, ['2026-01', '2026-02', '2026-03']);
+  const food = report.groups[0];
+  assert.deepEqual(food.cells, [10000, 0, 15000]);
+  assert.deepEqual(food.subs[0].cells, [10000, 0, 15000]);
+  assert.equal(food.totalCents, 25000);
+});
+
+test('the average is the total over every month in the range, rounded to the cent', () => {
+  add(card, '2026-01-10', -10000, groceries); // 100.00 over 3 months
+  const food = trend('2026-01-01', '2026-03-31').groups[0];
+  assert.equal(food.averageCents, 3333);
+  assert.equal(food.totalCents, 10000); // the total stays exact
+});
+
+test('rows are largest total first, and categories with no money are left out', () => {
+  add(card, '2026-01-10', -1000, dining);
+  add(checking, '2026-02-10', -50000, electric);
+  const report = trend('2026-01-01', '2026-02-28');
+  assert.deepEqual(report.groups.map((g) => g.name), ['Utilities', 'Food']);
+  assert.deepEqual(report.groups[1].subs.map((s) => s.name), ['Dining Out']); // no Groceries
+});
+
+test('each month column equals that month on its own, and the total equals the whole range', () => {
+  busyMonth(); // March, plus a row on each side of it
+  add(card, '2026-04-15', -7000, groceries);
+  add(checking, '2026-04-20', -300);
+
+  const report = trend('2026-02-01', '2026-04-30');
+  report.months.forEach((month, i) => {
+    const [y, m] = month.split('-').map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    assert.equal(report.total.cells[i], spending(`${month}-01`, `${month}-${last}`).totalCents, month);
+  });
+  assert.equal(report.total.totalCents, spending('2026-02-01', '2026-04-30').totalCents);
+  assert.equal(report.uncategorized.totalCents, spending('2026-02-01', '2026-04-30').uncategorized.cents);
+  assert.equal(report.uncategorized.count, 2);
+});
+
+test('a range cut mid-month only counts the days inside it', () => {
+  add(card, '2026-03-10', -100, groceries);
+  add(card, '2026-03-20', -1000, groceries);
+  const report = trend('2026-03-15', '2026-03-31');
+  assert.deepEqual(report.total.cells, [1000]);
 });
