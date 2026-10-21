@@ -303,6 +303,39 @@ export function actualsBetween(from, to) {
     .all(from, to);
 }
 
+// The transactions behind one amount on the Budget screen or a report
+// ("drill-down"), oldest first, from every account. Pick them by either:
+//   categoryIds:   one sub, or every sub of a group;
+//   uncategorized: 'in' or 'out', for the Uncategorized lines.
+// Uses exactly the same rules as actualsBetween (dates included at both ends,
+// transfers left out, "in" meaning amount > 0), so the rows listed always add
+// up to the amount that was clicked.
+export function transactionsFor({ categoryIds, uncategorized, from, to }) {
+  let which;
+  let values = [];
+  if (uncategorized) {
+    which = uncategorized === 'in' ? 't.category_id IS NULL AND t.amount_cents > 0' : 't.category_id IS NULL AND t.amount_cents <= 0';
+  } else {
+    // One "?" per id; the ids themselves are still passed as values, never
+    // glued into the SQL text.
+    which = `t.category_id IN (${categoryIds.map(() => '?').join(', ')})`;
+    values = categoryIds;
+  }
+  return db
+    .prepare(
+      `SELECT t.id, t.date, a.name AS account, p.name AS payee,
+              g.name || ': ' || c.name AS category, t.memo, t.amount_cents
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+         LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN categories g ON g.id = c.parent_id
+        WHERE t.date BETWEEN ? AND ? AND t.transfer_id IS NULL AND ${which}
+        ORDER BY t.date, t.id`
+    )
+    .all(from, to, ...values);
+}
+
 // Every standing planned amount: { category_id, start_month, amount_cents }.
 // All of them, not one month's: there are only a few per category, and
 // budget.js picks the one that applies to the month on screen.

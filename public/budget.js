@@ -14,6 +14,8 @@
 
 import { byId, getJson, postJson, runAction } from '/api.js';
 import { formatCents, parseDollarsToCents } from '/money.js';
+import { monthRange } from '/periods.js';
+import { drillButton } from '/drilldown.js';
 
 // The month on screen, as 'YYYY-MM'. Starts at the current month and is kept
 // when you switch to another screen and back.
@@ -88,10 +90,10 @@ function showSummary(budget) {
 function sectionRows(title, section) {
   const rows = [row(title, 'section-row', null, null, null)];
   for (const group of section.groups) {
-    rows.push(row(group.name, 'group-row', group.plannedCents, group.actualCents, group.differenceCents));
+    rows.push(row(group.name, 'group-row', group.plannedCents, group.actualCents, group.differenceCents, { categoryId: group.id }));
     for (const sub of group.subs) {
       const name = sub.isHidden ? `${sub.name} (hidden)` : sub.name;
-      const subRow = row(name, 'sub-row', null, sub.actualCents, sub.differenceCents);
+      const subRow = row(name, 'sub-row', null, sub.actualCents, sub.differenceCents, { categoryId: sub.id });
       if (title === 'Expenses') subRow.children[1].append(recurringBox(sub));
       subRow.children[2].append(...planInput(sub));
       subRow.classList.toggle('muted', sub.isHidden);
@@ -102,7 +104,8 @@ function sectionRows(title, section) {
   const { uncategorized } = section;
   if (uncategorized.count > 0) {
     const label = `Uncategorized (${uncategorized.count} ${uncategorized.count === 1 ? 'row' : 'rows'})`;
-    rows.push(row(label, 'group-row', null, uncategorized.cents, uncategorized.differenceCents));
+    const direction = title === 'Income' ? 'in' : 'out';
+    rows.push(row(label, 'group-row', null, uncategorized.cents, uncategorized.differenceCents, { uncategorized: direction }));
   }
   rows.push(
     row(`Total ${title.toLowerCase()}`, 'total-row', section.plannedCents, section.actualCents, section.differenceCents)
@@ -120,7 +123,9 @@ function sectionRows(title, section) {
 // expense subs) and three amounts (null leaves a cell blank).
 // A negative amount is red: overspent, short of planned income, or a
 // category with more refunds than spending.
-function row(label, className, plannedCents, actualCents, differenceCents) {
+// drill (optional) makes the Actual amount clickable, listing the month's
+// transactions behind it: { categoryId } or { uncategorized: 'in' | 'out' }.
+function row(label, className, plannedCents, actualCents, differenceCents, drill = null) {
   const tr = document.createElement('tr');
   tr.className = className;
 
@@ -131,11 +136,21 @@ function row(label, className, plannedCents, actualCents, differenceCents) {
   recurring.className = 'col-clr';
   tr.append(name, recurring);
 
-  for (const cents of [plannedCents, actualCents, differenceCents]) {
+  const columns = [
+    ['planned', plannedCents],
+    ['actual', actualCents],
+    ['difference', differenceCents],
+  ];
+  for (const [column, cents] of columns) {
     const amount = document.createElement('td');
     amount.className = 'col-money';
     if (cents !== null) {
-      amount.textContent = formatCents(cents);
+      if (drill && column === 'actual') {
+        const { from, to } = monthRange(month);
+        amount.append(drillButton(cents, drill, from, to));
+      } else {
+        amount.textContent = formatCents(cents);
+      }
       amount.classList.toggle('negative', cents < 0);
     }
     tr.append(amount);

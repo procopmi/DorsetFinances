@@ -284,6 +284,39 @@ const apiRoutes = {
     return { from, to, ...spendingByCategory(db.listCategories(), db.actualsBetween(from, to)) };
   },
 
+  // The transactions behind one amount (drill-down), for ?from=...&to=...
+  // and either ?categoryId=N (a sub, or a group meaning all its subs) or
+  // ?uncategorized=in|out. totalCents uses the same sign as the screens:
+  // spending positive for expense categories and money out, income positive
+  // for income categories and money in. So it equals the amount clicked.
+  'GET /api/transactions/for-category': (query) => {
+    const { from, to } = requireRange(query);
+
+    if (query.uncategorized !== undefined) {
+      if (query.uncategorized !== 'in' && query.uncategorized !== 'out') {
+        throw httpError(400, 'uncategorized must be "in" or "out"');
+      }
+      const rows = db.transactionsFor({ uncategorized: query.uncategorized, from, to });
+      const sign = query.uncategorized === 'in' ? 1 : -1;
+      const title = query.uncategorized === 'in' ? 'Uncategorized money in' : 'Uncategorized money out';
+      return { title, rows, totalCents: sign * rows.reduce((sum, row) => sum + row.amount_cents, 0) };
+    }
+
+    const category = requireCategory(Number(query.categoryId));
+    let categoryIds = [category.id];
+    let title;
+    if (category.parent_id === null) {
+      categoryIds = db.listCategories().filter((c) => c.parent_id === category.id).map((c) => c.id);
+      title = `${category.name} (all sub-categories)`;
+    } else {
+      title = `${db.getCategory(category.parent_id).name}: ${category.name}`;
+    }
+    // A group with no subs has nothing to list (and "IN ()" isn't valid SQL).
+    const rows = categoryIds.length > 0 ? db.transactionsFor({ categoryIds, from, to }) : [];
+    const sign = category.kind === 'income' ? 1 : -1;
+    return { title, rows, totalCents: sign * rows.reduce((sum, row) => sum + row.amount_cents, 0) };
+  },
+
   // Sets one category's planned amount. scope says how far it reaches:
   //   'standing': this month and later (the usual case);
   //   'month':    this month only. amountCents null removes this month's

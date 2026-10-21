@@ -302,5 +302,30 @@
     <p id="no-payees" class="muted" hidden>No payees yet. They're created as you enter transactions.</p>
     <datalist id="merge-payee-options"></datalist>
   </main>
+
+  <!-- ===== Drill-down (drilldown.js) =====
+       The transactions behind an amount clicked on the Budget or Reports
+       screen. A <dialog> sits on top of the page; Esc or Close shuts it. -->
+  <dialog id="drilldown" class="drilldown">
+    <h3 id="drilldown-title"></h3>
+    <p id="drilldown-period" class="muted"></p>
+    <table class="register-grid">
+      <thead>
+        <tr>
+          <th class="col-date">Date</th>
+          <th>Account</th>
+          <th class="col-payee">Payee</th>
+          <th class="col-category">Category</th>
+          <th class="col-memo">Memo</th>
+          <th class="col-money">Amount</th>
+        </tr>
+      </thead>
+      <tbody id="drilldown-rows"></tbody>
+    </table>
+    <p id="drilldown-total" class="drilldown-total"></p>
+    <form method="dialog" class="form-buttons">
+      <button type="submit">Close</button>
+    </form>
+  </dialog>
 </body>
 </html>

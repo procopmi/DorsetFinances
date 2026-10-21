@@ -208,6 +208,41 @@ body {
   opacity: 0.55;
 }
 
+/* --- Drill-down (drilldown.js) --- */
+
+/* A clickable amount that still looks like the plain number in its cell
+   (including red when negative), underlined on hover. */
+.drill-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.drill-link:hover,
+.drill-link:focus-visible {
+  text-decoration: underline;
+}
+
+.drilldown {
+  max-width: min(1000px, 95vw);
+  max-height: 85vh;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.drilldown h3 {
+  margin-top: 0;
+}
+
+.drilldown-total {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Categories and Payees screens --- */
 
 .screen {

@@ -2,12 +2,13 @@
 // chosen with the preset buttons or your own From/To dates.
 //
 // The server does the adding up (src/reports.js); this page draws the rows
-// and bars. Bars are plain <div>s sized as a percentage of the largest
+// and bars. Click an amount to see the transactions behind it (drilldown.js). Bars are plain <div>s sized as a percentage of the largest
 // group, so there's no charting library.
 
 import { byId, getJson, runAction } from '/api.js';
 import { formatCents } from '/money.js';
 import { presetRange, todayText } from '/periods.js';
+import { drillButton } from '/drilldown.js';
 
 // The period on screen. Starts as this month and is kept while the page is
 // open. preset is null when you've typed your own dates.
@@ -46,12 +47,12 @@ function renderSpending(report) {
       else openGroups.add(group.id);
       renderSpending(report);
     });
-    rows.push(row(toggle, group, largest, 'group-row'));
+    rows.push(row(toggle, group, largest, 'group-row', { categoryId: group.id }));
 
     if (isOpen) {
       for (const sub of group.subs) {
         const label = sub.isHidden ? `${sub.name} (hidden)` : sub.name;
-        rows.push(row(label, sub, largest, 'sub-row'));
+        rows.push(row(label, sub, largest, 'sub-row', { categoryId: sub.id }));
       }
     }
   }
@@ -59,7 +60,7 @@ function renderSpending(report) {
   const { uncategorized } = report;
   if (uncategorized.count > 0) {
     const label = `Uncategorized (${uncategorized.count} ${uncategorized.count === 1 ? 'row' : 'rows'})`;
-    rows.push(row(label, uncategorized, largest, 'group-row'));
+    rows.push(row(label, uncategorized, largest, 'group-row', { uncategorized: 'out' }));
   }
 
   if (rows.length === 0) {
@@ -70,8 +71,9 @@ function renderSpending(report) {
 }
 
 // One row: name (text, or the group's open/close button), bar, amount and
-// share. largest null means no bar (the total row).
-function row(label, item, largest, className) {
+// share. largest null means no bar (the total row). drill says which
+// transactions clicking the amount lists (none for the total row).
+function row(label, item, largest, className, drill = null) {
   const tr = document.createElement('tr');
   tr.className = className;
 
@@ -94,7 +96,8 @@ function row(label, item, largest, className) {
 
   const amount = document.createElement('td');
   amount.className = 'col-money';
-  amount.textContent = formatCents(item.cents);
+  if (drill) amount.append(drillButton(item.cents, drill, period.from, period.to));
+  else amount.textContent = formatCents(item.cents);
   amount.classList.toggle('negative', item.cents < 0);
 
   const share = document.createElement('td');

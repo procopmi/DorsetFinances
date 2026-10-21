@@ -104,3 +104,67 @@ test('a period with no spending has an empty report and 0 shares', () => {
   assert.equal(report.totalCents, 0);
   assert.equal(report.uncategorized.sharePercent, 0);
 });
+
+// --- Drill-down: the transactions behind an amount ---
+
+const listed = (what) => db.transactionsFor({ from: '2026-03-01', to: '2026-03-31', ...what });
+// Spending is the register amounts flipped (money out is negative there).
+const spent = (rows) => -rows.reduce((sum, t) => sum + t.amount_cents, 0);
+
+// A month with a bit of everything: refunds, other months, a transfer,
+// income, uncategorized money both ways.
+function busyMonth() {
+  add(card, '2026-02-28', -999, groceries);      // last month
+  add(card, '2026-03-01', -12000, groceries);
+  add(card, '2026-03-20', 2000, groceries);      // refund
+  add(card, '2026-03-31', -3000, dining);
+  add(checking, '2026-04-01', -999, dining);     // next month
+  add(checking, '2026-03-10', -20000, electric);
+  add(checking, '2026-03-01', 300000, pay);
+  add(checking, '2026-03-07', -2500);            // uncategorized out
+  add(checking, '2026-03-08', 4000);             // uncategorized in
+  db.createTransaction({ accountId: checking, date: '2026-03-15', amountCents: -50000, payeeName: 'Pay card', transferAccountId: card });
+}
+
+test('a sub-category lists exactly the rows behind its amount', () => {
+  busyMonth();
+  const report = spending('2026-03-01', '2026-03-31');
+  const food = report.groups.find((g) => g.name === 'Food');
+  const groceriesLine = food.subs.find((s) => s.id === groceries);
+
+  const rows = listed({ categoryIds: [groceries] });
+  assert.equal(rows.length, 2); // the charge and the refund, not February's
+  assert.equal(spent(rows), groceriesLine.cents);
+});
+
+test('a group lists all of its subs, adding up to the group amount', () => {
+  busyMonth();
+  const food = spending('2026-03-01', '2026-03-31').groups.find((g) => g.name === 'Food');
+  const rows = listed({ categoryIds: [groceries, dining] });
+  assert.equal(rows.length, 3); // includes 31 March, not 1 April
+  assert.equal(spent(rows), food.cents);
+});
+
+test('uncategorized in and out list only their own direction', () => {
+  busyMonth();
+  const out = listed({ uncategorized: 'out' });
+  const into = listed({ uncategorized: 'in' });
+  assert.equal(spent(out), spending('2026-03-01', '2026-03-31').uncategorized.cents);
+  assert.deepEqual(into.map((t) => t.amount_cents), [4000]);
+});
+
+test('transfers are never listed, even though they have no category', () => {
+  busyMonth();
+  const all = [...listed({ uncategorized: 'out' }), ...listed({ uncategorized: 'in' })];
+  assert.ok(all.every((t) => t.payee !== 'Pay card'));
+});
+
+test('listed rows carry what the list shows: date, account, payee, category, memo', () => {
+  add(card, '2026-03-05', -1234, groceries);
+  const [row] = listed({ categoryIds: [groceries] });
+  assert.equal(row.date, '2026-03-05');
+  assert.equal(row.account, 'Card');
+  assert.equal(row.payee, 'Someone');
+  assert.equal(row.category, 'Food: Groceries');
+  assert.equal(row.amount_cents, -1234);
+});
