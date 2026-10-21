@@ -6,7 +6,7 @@
 // amount with refunds lowering their category, and uncategorized money shown
 // as its own line.
 
-import { sumActuals } from './budget.js';
+import { sumActuals, buildBudget } from './budget.js';
 
 // Where the money went over a period: expense groups, largest first, each
 // with its subs (largest first) and its share of all spending.
@@ -109,6 +109,27 @@ export function monthlyTrend(categories, monthlyRows, months) {
     },
     total: line(reports.map((r) => r.totalCents)),
   };
+}
+
+// Money in vs. money out per month, and the net (in minus out).
+//   In:  income categories plus uncategorized money in;
+//   Out: spending, as in Spending by category (uncategorized money out included).
+// Each month is the Budget screen's own actual figures for that month (via
+// buildBudget, with no plans), so the net matches the Budget screen's.
+// Returns { months: [{ month, inCents, outCents, netCents }], total: { inCents, outCents, netCents } }.
+export function cashFlow(categories, monthlyRows, months) {
+  const noPlans = { plans: [], overrides: [] };
+  const rows = months.map((month) => {
+    const budget = buildBudget(categories, monthlyRows.filter((row) => row.month === month), { month, ...noPlans });
+    return {
+      month,
+      inCents: budget.income.actualCents,
+      outCents: budget.expenses.actualCents,
+      netCents: budget.actualNetCents,
+    };
+  });
+  const total = (field) => rows.reduce((sum, row) => sum + row[field], 0);
+  return { months: rows, total: { inCents: total('inCents'), outCents: total('outCents'), netCents: total('netCents') } };
 }
 
 // One row of the trend: its monthly amounts, their total, and the average

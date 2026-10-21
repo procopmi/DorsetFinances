@@ -197,6 +197,7 @@
     <nav class="report-views">
       <button type="button" data-view="spending">Spending by category</button>
       <button type="button" data-view="trend">Monthly trend</button>
+      <button type="button" data-view="cashflow">Income vs. expenses</button>
     </nav>
     <!-- The period: a preset button, or your own From/To dates (both included). -->
     <div class="period-picker">
@@ -225,6 +226,30 @@
           </tr>
         </thead>
         <tbody id="spending-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="cashflow-report" hidden>
+      <p class="muted">
+        Money in is income categories plus uncategorized deposits; money out is the spending
+        above. Net is in minus out: what you saved (or, in red, overspent) that month.
+      </p>
+      <!-- Drawn by cashflow-chart.js; the table below has the same numbers. -->
+      <div class="chart-legend">
+        <span><span class="swatch swatch-in"></span>Money in</span>
+        <span><span class="swatch swatch-out"></span>Money out</span>
+      </div>
+      <div id="cashflow-chart" class="chart"></div>
+      <table class="simple-table cashflow-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th class="col-money">Money in</th>
+            <th class="col-money">Money out</th>
+            <th class="col-money">Net</th>
+          </tr>
+        </thead>
+        <tbody id="cashflow-rows"></tbody>
       </table>
     </section>
 

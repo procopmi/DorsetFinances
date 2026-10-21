@@ -1,16 +1,18 @@
 // The Reports screen: a choice of report (Spending by category, Monthly
-// trend) for a period chosen with the preset buttons or your own From/To
+// trend, Income vs. expenses) for a period chosen with the preset buttons or your own From/To
 // dates.
 //
 // The server does the adding up (src/reports.js); this page draws the rows
 // and bars. Bars are plain <div>s sized as a percentage of the largest group,
-// so there's no charting library. Click an amount to see the transactions
+// so there's no charting library (the Income vs. expenses chart is in
+// cashflow-chart.js). Click an amount to see the transactions
 // behind it (drilldown.js).
 
 import { byId, getJson, runAction } from '/api.js';
 import { formatCents } from '/money.js';
 import { presetRange, todayText, monthWithin } from '/periods.js';
 import { drillButton } from '/drilldown.js';
+import { cashFlowChart } from '/cashflow-chart.js';
 
 // The report and period on screen. Both are kept while the page is open.
 // preset is null when you've typed your own dates.
@@ -34,10 +36,12 @@ export async function show() {
   }
   byId('spending-report').hidden = view !== 'spending';
   byId('trend-report').hidden = view !== 'trend';
+  byId('cashflow-report').hidden = view !== 'cashflow';
 
   const range = `from=${period.from}&to=${period.to}`;
   if (view === 'spending') renderSpending(await getJson(`/api/reports/spending?${range}`));
-  else renderTrend(await getJson(`/api/reports/trend?${range}`));
+  else if (view === 'trend') renderTrend(await getJson(`/api/reports/trend?${range}`));
+  else renderCashFlow(await getJson(`/api/reports/cashflow?${range}`));
 }
 
 // A group's name as a button that opens or closes its subs, then redraws
@@ -203,6 +207,30 @@ function trendRow(label, line, months, className, drill = null) {
   average.classList.toggle('negative', line.averageCents < 0);
   tr.append(average);
   return tr;
+}
+
+// --- Income vs. expenses ---
+
+function renderCashFlow(report) {
+  byId('cashflow-chart').replaceChildren(cashFlowChart(report.months, shortMonth));
+
+  const moneyRow = (label, item, className = '') => {
+    const tr = document.createElement('tr');
+    tr.className = className;
+    const net = cell(formatCents(item.netCents), 'col-money');
+    net.classList.toggle('negative', item.netCents < 0);
+    tr.append(
+      cell(label),
+      cell(formatCents(item.inCents), 'col-money'),
+      cell(formatCents(item.outCents), 'col-money'),
+      net
+    );
+    return tr;
+  };
+  byId('cashflow-rows').replaceChildren(
+    ...report.months.map((m) => moneyRow(shortMonth(m.month), m)),
+    moneyRow('Total', report.total, 'total-row')
+  );
 }
 
 // --- Choosing the report and period ---

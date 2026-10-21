@@ -8,7 +8,8 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as db from '../src/db.js';
-import { spendingByCategory, monthlyTrend } from '../src/reports.js';
+import { spendingByCategory, monthlyTrend, cashFlow } from '../src/reports.js';
+import { buildBudget } from '../src/budget.js';
 import { monthsBetween } from '../src/periods.js';
 
 let checking;
@@ -224,4 +225,46 @@ test('a range cut mid-month only counts the days inside it', () => {
   add(card, '2026-03-20', -1000, groceries);
   const report = trend('2026-03-15', '2026-03-31');
   assert.deepEqual(report.total.cells, [1000]);
+});
+
+// --- Income vs. expenses (cash flow) ---
+
+const flow = (from, to) => cashFlow(db.listCategories(), db.monthlyActualsBetween(from, to), monthsBetween(from, to));
+
+test('each month shows money in, money out and the net', () => {
+  busyMonth();
+  const march = flow('2026-03-01', '2026-03-31').months[0];
+  // In: pay 3,000.00 + uncategorized 40.00.
+  assert.equal(march.inCents, 304000);
+  // Out: groceries 100.00 (after refund) + dining 30.00 + electric 200.00 + uncategorized 25.00.
+  assert.equal(march.outCents, 35500);
+  assert.equal(march.netCents, 304000 - 35500);
+});
+
+test('a month with nothing has zeros, and totals add up the months', () => {
+  add(checking, '2026-01-02', 100000, pay);
+  add(card, '2026-03-05', -20000, groceries);
+  const report = flow('2026-01-01', '2026-03-31');
+  assert.deepEqual(report.months.map((m) => m.netCents), [100000, 0, -20000]);
+  assert.deepEqual(report.total, { inCents: 100000, outCents: 20000, netCents: 80000 });
+});
+
+test("a month's net is the Budget screen's actual net for that month", () => {
+  busyMonth();
+  const budget = buildBudget(db.listCategories(), db.actualsBetween('2026-03-01', '2026-03-31'), {
+    month: '2026-03',
+    plans: [],
+    overrides: [],
+  });
+  assert.equal(flow('2026-03-01', '2026-03-31').months[0].netCents, budget.actualNetCents);
+});
+
+test('the total net equals the change across all registers, transfers aside', () => {
+  busyMonth();
+  add(card, '2026-04-15', -7000, groceries);
+  const registerNet = [checking, card]
+    .flatMap((id) => db.getRegister(id))
+    .filter((t) => t.date >= '2026-02-01' && t.date <= '2026-04-30' && t.transfer_id === null)
+    .reduce((sum, t) => sum + t.amount_cents, 0);
+  assert.equal(flow('2026-02-01', '2026-04-30').total.netCents, registerNet);
 });

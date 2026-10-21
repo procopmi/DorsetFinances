@@ -18,7 +18,7 @@ import { exportRegisterCsv, parseBankCsv } from './csv.js';
 import { makeBackup } from './backup.js';
 import { matchRule, ruleMatches, suggestPattern, categoryForAmount, proposeRuleResults } from './rules.js';
 import { buildBudget } from './budget.js';
-import { spendingByCategory, monthlyTrend } from './reports.js';
+import { spendingByCategory, monthlyTrend, cashFlow } from './reports.js';
 import { monthRange, monthsBetween } from './periods.js';
 
 // --- Input checks ---
@@ -82,6 +82,14 @@ function requireRange(query) {
   const to = requireDate(query.to);
   if (from > to) throw httpError(400, 'The From date is after the To date');
   return { from, to };
+}
+
+// The months a per-month report covers, capped at 36 so the grid and chart
+// stay readable.
+function requireReportMonths(from, to) {
+  const months = monthsBetween(from, to);
+  if (months.length > 36) throw httpError(400, `That's ${months.length} months; per-month reports show up to 36`);
+  return months;
 }
 
 // Optional text such as a memo: blank becomes null (nothing stored), and very
@@ -285,12 +293,17 @@ const apiRoutes = {
   },
 
   // Spending per month over a date range: categories down, months across.
-  // Capped at 36 months so the grid stays readable.
   'GET /api/reports/trend': (query) => {
     const { from, to } = requireRange(query);
-    const months = monthsBetween(from, to);
-    if (months.length > 36) throw httpError(400, `That's ${months.length} months; the trend shows up to 36`);
+    const months = requireReportMonths(from, to);
     return { from, to, ...monthlyTrend(db.listCategories(), db.monthlyActualsBetween(from, to), months) };
+  },
+
+  // Money in, money out and the net, per month over a date range.
+  'GET /api/reports/cashflow': (query) => {
+    const { from, to } = requireRange(query);
+    const months = requireReportMonths(from, to);
+    return { from, to, ...cashFlow(db.listCategories(), db.monthlyActualsBetween(from, to), months) };
   },
 
   // The transactions behind one amount (drill-down), for ?from=...&to=...

@@ -3,6 +3,11 @@
 
 :root {
   --chart-bar: #2563eb;  /* the one hue for single-series bars */
+  /* Two-series charts (money in / money out). Checked as a pair for
+     colour-blind readers and contrast on a light background. */
+  --chart-in: #2a78d6;
+  --chart-out: #eb6834;
+  --chart-grid: #e5e7eb;
   --border: #c9ced6;
   --muted: #6b7280;
   --header-bg: #eef1f5;
@@ -191,6 +196,48 @@ body {
 
 .trend-table .sub-row td:first-child {
   padding-left: 28px;
+}
+
+/* --- Income vs. expenses chart (cashflow-chart.js) --- */
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0 4px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+.swatch-in { background: var(--chart-in); }
+.swatch-out { background: var(--chart-out); }
+
+.chart {
+  overflow-x: auto;  /* many months: scroll sideways rather than shrink */
+}
+
+.chart svg {
+  display: block;
+}
+
+.chart .bar-in { fill: var(--chart-in); }
+.chart .bar-out { fill: var(--chart-out); }
+.chart .gridline { stroke: var(--chart-grid); stroke-width: 1; }
+.chart .baseline { stroke: var(--border); stroke-width: 1; }
+.chart text {
+  font-size: 11px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cashflow-table .total-row td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
 }
 
 /* Total and Average columns set apart from the months. */
