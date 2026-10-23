@@ -24,7 +24,7 @@ Sources: this session's chat, the git log, the current code, and the plan file i
 | Frontend | Plain HTML/CSS/JS, no framework, no build step | Per CLAUDE.md |
 | npm dependencies | **None** | |
 | Network | Listens on `127.0.0.1:3000` only | Per CLAUDE.md |
-| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 134 tests at present |
+| Tests | `node --test`, money math and CSV only, in-memory databases | Per CLAUDE.md. 140 tests at present |
 
 **Safety additions beyond CLAUDE.md:**
 - **(recap)** `isTrustedRequest` refuses any request whose Host isn't `127.0.0.1:3000` or `localhost:3000`, and any POST that isn't JSON. This stops other websites open in your browser from changing your data (DNS rebinding / CSRF).
@@ -132,6 +132,11 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **Mark cleared as reconciled** locks every `c` row as `R`.
   - Editing, deleting or unclearing an `R` row asks first.
   - The planned statement panel and `reconciliations` table were dropped.
+- **Date filter and order (milestone 16):**
+  - Year and Month dropdowns, or your own From/To dates (which set Year to "Custom dates"). It opens on the current year each time the page loads.
+  - Filtering only hides rows. Each row keeps its whole-history running balance, and when earlier rows are hidden the top line becomes "Balance forward". The header's Balance and Cleared stay whole-account.
+  - The order button switches newest first / oldest first and is remembered in your browser (not the database). Newest first puts the entry row on top.
+  - Saving a row dated outside the dates shown keeps it hidden, with a note saying so.
 
 ### Categories and payees (milestone 5)
 - **The category list (approved 2026-10-16)** lives in `src/default-categories.js`: 17 groups and 67 subs.
@@ -314,7 +319,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 15b | Drill-down: click an amount to list its transactions (reports and Budget) | Done | `9ef0efb` |
 | 15c | Monthly trend | Done | `941a4e1` |
 | 15d | Income vs. expenses (cash flow) | Done | `5157e89` |
-| 15e | Dashboard | Done | (this commit) |
+| 15e | Dashboard | Done | `8c15242` |
+| 16 | Register date filter (Year/Month or From/To, current year by default) and newest-first order | Done | (this commit) |
 
 ### What's next
 All three phases in CLAUDE.md are built. Nothing is planned next. Ideas that came up along the way, for whenever real use calls for them:

@@ -125,6 +125,17 @@
         <button type="submit">Download CSV</button>
         <button type="button" id="cancel-export">Cancel</button>
       </form>
+      <!-- Which dates the grid shows, and in which order (register.js). The
+           dropdowns fill in From/To; typing your own dates sets Year to Custom. -->
+      <div id="register-filter" class="period-picker">
+        <label>Show
+          <select id="filter-year"></select>
+        </label>
+        <select id="filter-month"></select>
+        <label>From <input type="date" id="filter-from"></label>
+        <label>To <input type="date" id="filter-to"></label>
+        <button type="button" id="toggle-sort"></button>
+      </div>
       <table class="register-grid">
         <thead>
           <tr>
@@ -144,9 +155,11 @@
         </tbody>
       </table>
       <p id="entry-error" class="form-error" hidden></p>
+      <!-- Says when a row you just saved is dated outside the dates shown. -->
+      <p id="entry-note" class="muted" hidden></p>
       <p class="muted keyboard-hint">
         Tab moves between fields · Enter saves · Esc cancels ·
-        Shift+Tab from the new row reaches the list, then ↑/↓ move, Enter edits, Space marks cleared, Delete removes
+        Shift+Tab from the new row (Tab when newest first) reaches the list, then ↑/↓ move, Enter edits, Space marks cleared, Delete removes
       </p>
       <!-- Suggestions for the Payee and Category boxes, filled in by register.js. -->
       <datalist id="payee-options"></datalist>

@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runningBalances, clearedBalance } from '../src/money.js';
+import { runningBalances, clearedBalance, registerView } from '../src/money.js';
 import * as db from '../src/db.js';
 
 test('an account with no transactions has no balance rows', () => {
@@ -96,4 +96,55 @@ test('the register only includes the requested account', () => {
   db.createTransaction({ accountId: second, date: '2026-01-02', amountCents: 999 });
 
   assert.deepEqual(db.getRegister(first).map((r) => r.amount_cents), [100]);
+});
+
+// --- Date filter (registerView) ---
+
+// A small register: opening 1,000.00, then four rows with their running balances.
+const reg = [
+  { id: 1, date: '2025-11-20', balance_cents: 90000 },
+  { id: 2, date: '2025-12-31', balance_cents: 85000 },
+  { id: 3, date: '2026-01-01', balance_cents: 95000 },
+  { id: 4, date: '2026-02-10', balance_cents: 80000 },
+];
+const ids = (view) => view.rows.map((r) => r.id);
+
+test('no dates: every row, and the real opening balance', () => {
+  const view = registerView(reg, 100000, { from: '', to: '' });
+  assert.deepEqual(ids(view), [1, 2, 3, 4]);
+  assert.equal(view.hasEarlier, false);
+  assert.equal(view.forwardCents, 100000);
+});
+
+test('a range in the middle: balance forward is the last hidden row\'s balance', () => {
+  const view = registerView(reg, 100000, { from: '2026-01-01', to: '2026-01-31' });
+  assert.deepEqual(ids(view), [3]);
+  assert.equal(view.hasEarlier, true);
+  assert.equal(view.forwardCents, 85000);
+  // The rows keep their whole-history balances.
+  assert.equal(view.rows[0].balance_cents, 95000);
+});
+
+test('rows on the From and To dates are included', () => {
+  assert.deepEqual(ids(registerView(reg, 100000, { from: '2025-12-31', to: '2026-01-01' })), [2, 3]);
+});
+
+test('a range before the first transaction starts from the opening balance', () => {
+  const view = registerView(reg, 100000, { from: '2025-01-01', to: '2025-06-30' });
+  assert.deepEqual(ids(view), []);
+  assert.equal(view.hasEarlier, false);
+  assert.equal(view.forwardCents, 100000);
+});
+
+test('an empty range after some rows still knows the balance forward', () => {
+  const view = registerView(reg, 100000, { from: '2026-01-02', to: '2026-01-31' });
+  assert.deepEqual(ids(view), []);
+  assert.equal(view.forwardCents, 95000);
+});
+
+test('open-ended ranges: only From, or only To', () => {
+  assert.deepEqual(ids(registerView(reg, 100000, { from: '2026-01-01', to: '' })), [3, 4]);
+  const view = registerView(reg, 100000, { from: '', to: '2025-12-31' });
+  assert.deepEqual(ids(view), [1, 2]);
+  assert.equal(view.forwardCents, 100000);
 });

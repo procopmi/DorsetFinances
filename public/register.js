@@ -4,10 +4,11 @@
 // /api/ routes.
 
 // The same money.js the server uses (and the tests cover), served at /money.js.
-import { parseDollarsToCents, formatCents } from '/money.js';
+import { parseDollarsToCents, formatCents, registerView } from '/money.js';
 import { byId, getJson, postJson, runAction, makeButton } from '/api.js';
 // rules.js is shared the same way, for picking a category by amount.
 import { categoryForAmount } from '/rules.js';
+import { monthRange } from '/periods.js';
 
 // --- Page state ---
 // The accounts as last loaded from the server, and which one is selected.
@@ -81,6 +82,7 @@ function fillAccountList(list, items) {
 function renderRegisterHeader() {
   const account = accounts.find((a) => a.id === selectedId);
   byId('account-actions').hidden = !account;
+  byId('register-filter').hidden = !account;
   byId('register-title').textContent = account ? account.name : 'Register';
 
   if (account) {
@@ -290,27 +292,51 @@ function renderRows() {
   // Closed accounts are read-only: reopen one to change it.
   const canEdit = !account.is_closed;
 
+  // Only the rows inside the chosen dates are drawn (see "Date filter" below).
+  fillYearOptions();
+  const view = registerView(register.rows, register.openingBalanceCents, { from: filterFrom, to: filterTo });
+  visibleRows = view.rows;
+
   // The first row is the opening balance, like the top line of a checkbook.
+  // When earlier rows are left out, it's the balance carried forward from
+  // them instead, so the running balances below still add up.
   const openingRow = document.createElement('tr');
   openingRow.className = 'opening-row';
   openingRow.append(
-    cell(register.openingDate),
+    cell(view.hasEarlier ? '' : register.openingDate),
     cell(''),
-    cell('Opening balance'),
+    cell(view.hasEarlier ? 'Balance forward' : 'Opening balance'),
     cell(''),
     cell(''),
     cell('', 'col-money'),
     cell('', 'col-clr'),
     cell('', 'col-money'),
-    balanceCell(register.openingBalanceCents)
+    balanceCell(view.forwardCents)
   );
 
-  const rows = register.rows.map((t) =>
-    canEdit && t.id === editingId ? buildEditRow(t) : buildViewRow(t, canEdit)
+  // The one line reachable with Tab (see buildViewRow): the last one you were
+  // on if it's still shown, otherwise the newest shown.
+  const tabRowId = view.rows.some((r) => r.id === focusedRowId) ? focusedRowId : view.rows.at(-1)?.id;
+  const rows = view.rows.map((t) =>
+    canEdit && t.id === editingId ? buildEditRow(t) : buildViewRow(t, canEdit, tabRowId)
   );
-  if (canEdit) rows.push(buildNewRow());
+  if (rows.length === 0) {
+    const empty = document.createElement('tr');
+    empty.className = 'empty-row';
+    const td = cell('No transactions in these dates.');
+    td.colSpan = 9;
+    empty.append(td);
+    rows.push(empty);
+  }
 
-  byId('register-rows').replaceChildren(openingRow, ...rows);
+  // Oldest first reads top to bottom like a checkbook, with the entry row at
+  // the bottom. Newest first is the same list upside down: entry row on top,
+  // opening line at the bottom.
+  const allRows = [openingRow, ...rows];
+  if (canEdit) allRows.push(buildNewRow());
+  if (newestFirst) allRows.reverse();
+
+  byId('register-rows').replaceChildren(...allRows);
   hideEntryError();
 
   // The current balance is the last row's balance (or the opening balance if
@@ -344,7 +370,7 @@ function splitAmount(amountCents) {
 }
 
 // A plain (not being edited) transaction line.
-function buildViewRow(t, canEdit) {
+function buildViewRow(t, canEdit, tabRowId) {
   const { outflow, inflow } = splitAmount(t.amount_cents);
   const row = document.createElement('tr');
   row.className = 'transaction-row';
@@ -374,7 +400,7 @@ function buildViewRow(t, canEdit) {
 
     // "Roving tabindex": only one transaction row is reachable with Tab, so
     // tabbing doesn't stop on every row; ↑/↓ move between rows from there.
-    row.tabIndex = t.id === (focusedRowId ?? currentRegister.rows.at(-1)?.id) ? 0 : -1;
+    row.tabIndex = t.id === tabRowId ? 0 : -1;
     row.addEventListener('click', () => startEdit(t));
     row.addEventListener('focus', () => {
       focusedRowId = t.id;
@@ -445,6 +471,136 @@ byId('reconcile-cleared').addEventListener('click', () =>
     await loadRegister();
   })
 );
+
+// --- Date filter and sort order ---
+
+// Which dates the grid shows. The Year and Month dropdowns fill in From/To;
+// typing your own dates sets Year to "custom". Blank From/To means no limit.
+// It starts on the whole current year each time the page loads, and stays
+// as you switch accounts.
+let filterYear = todayText().slice(0, 4); // 'YYYY', 'all' or 'custom'
+let filterMonth = '';                      // '' (whole year) or '01'..'12'
+let filterFrom = `${filterYear}-01-01`;
+let filterTo = `${filterYear}-12-31`;
+let visibleRows = [];                      // the rows the grid last drew
+
+// Newest first or oldest first. Unlike the dates, this is remembered (in this
+// browser only) after a reload. Storage can be blocked, e.g. in a private
+// window, so a failure just means oldest first.
+const SORT_KEY = 'registerNewestFirst';
+let newestFirst = false;
+try {
+  newestFirst = localStorage.getItem(SORT_KEY) === 'true';
+} catch {
+  // keep oldest first
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+// An <option> for a dropdown.
+function option(value, text) {
+  const o = document.createElement('option');
+  o.value = value;
+  o.textContent = text;
+  return o;
+}
+
+byId('filter-month').replaceChildren(
+  option('', 'Whole year'),
+  ...MONTH_NAMES.map((name, i) => option(String(i + 1).padStart(2, '0'), name))
+);
+
+// The Year choices for the selected account: every year from its first
+// entry (or opening date) to this year, newest first, plus the year already
+// chosen even if this account has nothing then. "Custom" is only listed while
+// it's in use, so it can't be picked by itself.
+function fillYearOptions() {
+  const dates = [currentRegister.openingDate, ...currentRegister.rows.map((r) => r.date)];
+  const thisYear = Number(todayText().slice(0, 4));
+  const first = Math.min(thisYear, ...dates.map((d) => Number(d.slice(0, 4))));
+  const last = Math.max(thisYear, ...dates.map((d) => Number(d.slice(0, 4))));
+  const years = [];
+  for (let year = last; year >= first; year--) years.push(String(year));
+  if (/^\d{4}$/.test(filterYear) && !years.includes(filterYear)) years.push(filterYear);
+  years.sort().reverse();
+
+  const yearSelect = byId('filter-year');
+  yearSelect.replaceChildren(
+    ...(filterYear === 'custom' ? [option('custom', 'Custom dates')] : []),
+    option('all', 'All years'),
+    ...years.map((year) => option(year, year))
+  );
+  showFilterControls();
+}
+
+// Puts the current choices into the controls.
+function showFilterControls() {
+  byId('filter-year').value = filterYear;
+  const month = byId('filter-month');
+  month.value = filterMonth;
+  // A month only means something within one year.
+  month.disabled = !/^\d{4}$/.test(filterYear);
+  byId('filter-from').value = filterFrom;
+  byId('filter-to').value = filterTo;
+  const sortButton = byId('toggle-sort');
+  sortButton.textContent = newestFirst ? 'Order: newest first' : 'Order: oldest first';
+  sortButton.title = 'Click to reverse the order';
+}
+
+// Works out From/To from the Year and Month dropdowns.
+function applyDropdowns() {
+  if (filterYear === 'all') {
+    filterFrom = '';
+    filterTo = '';
+  } else if (filterMonth) {
+    ({ from: filterFrom, to: filterTo } = monthRange(`${filterYear}-${filterMonth}`));
+  } else {
+    filterFrom = `${filterYear}-01-01`;
+    filterTo = `${filterYear}-12-31`;
+  }
+}
+
+// Redraws the grid with the new choices. Nothing is fetched: the page already
+// has every row of the account, with its balance.
+function redrawFiltered() {
+  editingId = null;
+  if (currentRegister) renderRows();
+  else showFilterControls();
+}
+
+byId('filter-year').addEventListener('change', (event) => {
+  filterYear = event.target.value;
+  if (filterYear === 'all') filterMonth = '';
+  applyDropdowns();
+  redrawFiltered();
+});
+
+byId('filter-month').addEventListener('change', (event) => {
+  filterMonth = event.target.value;
+  applyDropdowns();
+  redrawFiltered();
+});
+
+for (const id of ['filter-from', 'filter-to']) {
+  byId(id).addEventListener('change', () => {
+    filterFrom = byId('filter-from').value;
+    filterTo = byId('filter-to').value;
+    filterYear = 'custom';
+    filterMonth = '';
+    redrawFiltered();
+  });
+}
+
+byId('toggle-sort').addEventListener('click', () => {
+  newestFirst = !newestFirst;
+  try {
+    localStorage.setItem(SORT_KEY, String(newestFirst));
+  } catch {
+    // not remembered this time; the order still changes
+  }
+  redrawFiltered();
+});
 
 // --- Exporting to CSV ---
 
@@ -744,6 +900,17 @@ function showEntryError(message) {
 
 function hideEntryError() {
   byId('entry-error').hidden = true;
+  byId('entry-note').hidden = true;
+}
+
+// After a save: if the row's date is outside the dates shown, it's now hidden,
+// so say so rather than let it vanish.
+function noteIfHidden(date) {
+  const shown = (!filterFrom || date >= filterFrom) && (!filterTo || date <= filterTo);
+  if (shown) return;
+  const note = byId('entry-note');
+  note.textContent = `Saved. It's dated ${date}, outside the dates shown, so it's hidden.`;
+  note.hidden = false;
 }
 
 // Server-side problems (like a rejected date) are shown the same way as
@@ -766,6 +933,7 @@ async function saveNewTransaction(fields) {
   lastEnteredDate = data.date;
   focusedRowId = saved.id;
   await loadRegister();
+  noteIfHidden(data.date);
   // Ready for the next one.
   byId('new-row')?.querySelector('input[name="date"]').focus();
 }
@@ -802,6 +970,7 @@ async function saveEditedTransaction(t, fields) {
   editingId = null;
   focusedRowId = t.id;
   await loadRegister();
+  noteIfHidden(data.date);
   document.querySelector(`.transaction-row[data-id="${t.id}"]`)?.focus();
 }
 
@@ -816,7 +985,7 @@ async function deleteTransaction(t) {
   if (!confirm(message)) return;
 
   // Afterwards, keep your place by moving to the line below (or above).
-  const rows = currentRegister.rows;
+  const rows = visibleRows;
   const index = rows.findIndex((r) => r.id === t.id);
   const neighbor = rows[index + 1] ?? rows[index - 1];
 

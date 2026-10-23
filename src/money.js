@@ -107,3 +107,23 @@ export function clearedBalance(openingCents, transactions) {
   }
   return balance;
 }
+
+// The part of a register that falls in a date range, for the register's date
+// filter. `rows` are in register order (oldest first), each with the
+// balance_cents runningBalances gave it over the account's whole history, so
+// the balances shown stay true however the list is cut. from/to are
+// 'YYYY-MM-DD' and include both ends; either can be '' for "no limit".
+// Returns:
+//   rows:         the rows inside the range, still oldest first;
+//   hasEarlier:   true when rows before `from` were left out;
+//   forwardCents: the balance just before the range (the "Balance forward"
+//                 line), which is the opening balance when nothing earlier
+//                 was left out.
+export function registerView(rows, openingCents, { from = '', to = '' } = {}) {
+  const earlier = from ? rows.filter((r) => r.date < from) : [];
+  return {
+    rows: rows.filter((r) => (!from || r.date >= from) && (!to || r.date <= to)),
+    hasEarlier: earlier.length > 0,
+    forwardCents: earlier.at(-1)?.balance_cents ?? openingCents,
+  };
+}
