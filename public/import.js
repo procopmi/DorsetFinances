@@ -66,6 +66,9 @@ function showPreview(account, fileName, preview) {
   if (duplicates) parts.push(`${duplicates} already imported (will be skipped)`);
   if (handEntered) parts.push(`${handEntered} matching rows you entered by hand`);
   if (transfers) parts.push(`${transfers} matching transfers in other accounts`);
+  if (preview.reinvestmentsSkipped) {
+    parts.push(`${preview.reinvestmentsSkipped} reinvestment row(s) ignored (cash balance only)`);
+  }
   if (preview.problems.length) parts.push(`${preview.problems.length} that couldn't be read (listed below)`);
   byId('import-summary').textContent =
     `${fileName}: ${preview.format.label} for "${account.name}". ${parts.join(', ')}.`;

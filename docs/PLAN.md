@@ -203,6 +203,7 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 - **Other choices you made:**
   - Cash withdrawals go to **Other: Cash**.
   - Fidelity is an **investment** account type that tracks the cash balance only. Dividends are recorded under Other Income: Dividends. Because the money market reinvests at $1 a share, the dividend deposit is the only entry needed. Shares and prices aren't tracked (out of scope).
+  - **Fidelity import (milestone 17):** the activity download is read by its 13-column header, with the Action text as the description and Cash Balance used for the bank-balance check. REINVESTMENT rows are left out (the preview counts them) because they only buy shares with the dividend and don't change the cash. Remove the disclaimer and personal details before importing, so the header is the first line.
 - **Milestone 9b additions:**
   - **Remembered payee rules.** Rules made from the preview are always "contains" rules (recap). When several rules match, the most specific wins: exact, then starts with, then contains, then the longer pattern.
   - **Linking transfers during import**, offered only when there's exactly one match.
@@ -320,7 +321,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 15c | Monthly trend | Done | `941a4e1` |
 | 15d | Income vs. expenses (cash flow) | Done | `5157e89` |
 | 15e | Dashboard | Done | `8c15242` |
-| 16 | Register date filter (Year/Month or From/To, current year by default) and newest-first order | Done | (this commit) |
+| 16 | Register date filter (Year/Month or From/To, current year by default) and newest-first order | Done | `68b5eea` |
+| 17 | Fidelity CSV import (cash only; reinvestment rows skipped) | Done | (this commit) |
 
 ### What's next
 All three phases in CLAUDE.md are built. Nothing is planned next. Ideas that came up along the way, for whenever real use calls for them:

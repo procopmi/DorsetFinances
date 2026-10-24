@@ -171,13 +171,15 @@ export function parseBankDate(text) {
 }
 
 // The bank download formats the app understands, recognised by their header
-// line. All accounts are at Chase, so there are two: one for checking and
-// savings, one for credit cards. Both already use our sign convention
-// (negative = money out), so amounts are taken as they are.
+// line. The bank accounts are at Chase, with one format for checking and
+// savings and one for credit cards; the money market is at Fidelity. All
+// three already use our sign convention (negative = money out), so amounts
+// are taken as they are.
 //
 // `read` turns one row (a lookup from column name to text) into the parts
 // we use. `fingerprintParts` are the values that identify a row, used to
 // recognise it if the same row turns up again in a later download.
+// `skip` (optional) picks out rows to leave out of the import entirely.
 export const BANK_FORMATS = [
   {
     id: 'chase-deposit',
@@ -217,6 +219,33 @@ export const BANK_FORMATS = [
       fingerprintParts: [col('Transaction Date'), col('Post Date'), col('Description'), col('Amount')],
     }),
   },
+  {
+    id: 'fidelity',
+    label: 'Fidelity download',
+    accountTypes: ['investment'],
+    header: [
+      'Run Date', 'Action', 'Symbol', 'Description', 'Type', 'Price ($)', 'Quantity',
+      'Commission ($)', 'Fees ($)', 'Accrued Interest ($)', 'Amount ($)', 'Cash Balance ($)', 'Settlement Date',
+    ],
+    read: (col) => ({
+      dateText: col('Run Date'),
+      // Fidelity's Description is often just "No Description"; the Action
+      // ("DIVIDEND RECEIVED ...", "DIRECT DEPOSIT ...") says what happened.
+      description: col('Action'),
+      amountText: col('Amount ($)'),
+      checkNumber: '',
+      bankType: col('Action'),
+      bankCategory: '',
+      memo: '',
+      bankBalanceText: col('Cash Balance ($)'),
+      fingerprintParts: [col('Run Date'), col('Action'), col('Amount ($)'), col('Cash Balance ($)')],
+    }),
+    // Only the cash balance is tracked (decision in PLAN.md). The money
+    // market reinvests each dividend at $1 a share, so every dividend has a
+    // matching REINVESTMENT row that buys shares with it. That row doesn't
+    // change the cash balance, so it's left out.
+    skip: (col) => col('Action').toUpperCase().startsWith('REINVESTMENT'),
+  },
 ];
 
 // Header cells, tidied for comparison: trimmed, lower-case, with empty cells
@@ -235,10 +264,11 @@ function detectDelimiter(text) {
 }
 
 // Reads a bank download for an account of type `accountType`.
-// Returns { format, rows, problems } where each row is
+// Returns { format, rows, problems, skipped } where each row is
 //   { line, date, description, amountCents, checkNumber, bankType,
 //     bankCategory, memo, bankBalanceCents, fingerprint }
-// and problems lists rows that couldn't be read ("line 7: ..."). Throws an
+// problems lists rows that couldn't be read ("line 7: ..."), and skipped
+// counts rows the format leaves out on purpose (Fidelity reinvestments). Throws an
 // Error if the file isn't a recognised format, or is the wrong kind for the
 // account (a card file for a checking account).
 export function parseBankCsv(text, accountType) {
@@ -263,10 +293,15 @@ export function parseBankCsv(text, accountType) {
   // How many times each fingerprint has been seen so far in this file, so
   // that genuinely identical rows (two $5 coffees on one day) stay distinct.
   const seen = new Map();
+  let skipped = 0;
 
   for (const { line, fields } of dataRows) {
     // Look up a column by name; a missing trailing column counts as empty.
     const col = (name) => (fields[format.header.indexOf(name)] ?? '').trim();
+    if (format.skip?.(col)) {
+      skipped++;
+      continue;
+    }
     const raw = format.read(col);
 
     const date = parseBankDate(raw.dateText);
@@ -308,5 +343,5 @@ export function parseBankCsv(text, accountType) {
     });
   }
 
-  return { format: { id: format.id, label: format.label }, rows, problems };
+  return { format: { id: format.id, label: format.label }, rows, problems, skipped };
 }

@@ -203,11 +203,13 @@ function readTransactionFields(body, ownAccountId, currentOtherAccountId) {
 // Used only to add a hint in the preview.
 function looksLikeTransfer(formatId, bankType) {
   if (formatId === 'chase-card') return bankType === 'Payment';
+  // Fidelity puts it in the Action text, e.g. "DIRECT DEPOSIT JPMorgan ChaExt Trnsfr".
+  if (formatId === 'fidelity') return /trnsfr|transfer/i.test(bankType);
   return bankType === 'ACCT_XFER' || bankType === 'LOAN_PMT';
 }
 
 // The bank's own balance after its most recent row, from a checking/savings
-// file: { date, cents }, or null if the file has no balances (card files).
+// or Fidelity file: { date, cents }, or null if the file has no balances (card files).
 // For several rows on the latest date, the first one in the file is taken,
 // since the bank lists newest first.
 function latestBankBalance(rows) {
@@ -508,6 +510,8 @@ const apiRoutes = {
     return {
       format: parsed.format,
       problems: parsed.problems,
+      // Fidelity reinvestment rows, left out because only cash is tracked.
+      reinvestmentsSkipped: parsed.skipped,
       rows,
       bankBalance: latestBankBalance(parsed.rows),
     };
@@ -588,7 +592,7 @@ const apiRoutes = {
     const counts = db.importTransactions(account.id, toImport);
 
     // For the check against the bank: your cleared balance now, next to the
-    // bank's own balance from the file (checking and savings files only).
+    // bank's own balance from the file (checking, savings and Fidelity files).
     const register = db.getRegister(account.id);
     return {
       ...counts,

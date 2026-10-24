@@ -132,6 +132,17 @@ const CARD_FILE = [
   '8/28/26,8/30/26,Car Service,Automotive,Sale,-200,',
 ].join('\n');
 
+// Shaped like a Fidelity activity download (made-up amounts), newest first.
+// Each dividend has a matching REINVESTMENT row buying shares with it.
+const FIDELITY_HEADER =
+  'Run Date,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date';
+const FIDELITY_FILE = [
+  FIDELITY_HEADER,
+  '10/19/2026,DIRECT DEPOSIT JPMorgan ChaExt Trnsfr (Cash),"",No Description,Cash,"",0,"","","",500,1600.50,""',
+  '09/30/2026,REINVESTMENT FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash),SPAXX,FIDELITY GOVERNMENT MONEY MARKET,Cash,1,12.34,"","","","-12.34",1100.50,""',
+  '09/30/2026,DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash),SPAXX,FIDELITY GOVERNMENT MONEY MARKET,Cash,"",0,"","","",12.34,1100.50,""',
+].join('\n');
+
 test('parseCsv handles quoted commas, doubled quotes and line breaks inside quotes', () => {
   const rows = parseCsv('a,"b, c","say ""hi"""\r\n"two\nlines",x,y\n\nlast,1,2');
   assert.deepEqual(rows.map((r) => r.fields), [
@@ -195,7 +206,39 @@ test('a credit card download is recognised and read', () => {
   assert.equal(service.bankBalanceCents, null);
 });
 
+test('a Fidelity download is read, leaving out the reinvestment rows', () => {
+  const { format, rows, skipped } = parseBankCsv(FIDELITY_FILE, 'investment');
+  assert.equal(format.id, 'fidelity');
+  // The reinvestment only buys shares with the dividend; the cash is unchanged.
+  assert.equal(skipped, 1);
+  const [deposit, dividend] = rows;
+  assert.equal(rows.length, 2);
+  assert.equal(deposit.date, '2026-10-19');
+  assert.equal(deposit.description, 'DIRECT DEPOSIT JPMorgan ChaExt Trnsfr (Cash)');
+  assert.equal(deposit.amountCents, 50000);
+  assert.equal(deposit.bankBalanceCents, 160050);
+  assert.equal(dividend.description, 'DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash)');
+  assert.equal(dividend.amountCents, 1234);
+  assert.equal(dividend.checkNumber, null);
+});
+
+test('Fidelity fingerprints are the same across overlapping downloads', () => {
+  const first = parseBankCsv(FIDELITY_FILE, 'investment').rows;
+  const later = [
+    FIDELITY_HEADER,
+    '10/31/2026,DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash),SPAXX,FIDELITY GOVERNMENT MONEY MARKET,Cash,"",0,"","","",3.10,1603.60,""',
+    ...FIDELITY_FILE.split('\n').slice(1),
+  ].join('\n');
+  const again = parseBankCsv(later, 'investment').rows;
+  assert.deepEqual(again.slice(1).map((r) => r.fingerprint), first.map((r) => r.fingerprint));
+});
+
+test('the Chase formats skip nothing', () => {
+  assert.equal(parseBankCsv(DEPOSIT_FILE, 'checking').skipped, 0);
+});
+
 test('the wrong kind of file for the account is refused', () => {
+  assert.throws(() => parseBankCsv(FIDELITY_FILE, 'checking'), /Fidelity download/);
   assert.throws(() => parseBankCsv(CARD_FILE, 'checking'), /credit card download/);
   assert.throws(() => parseBankCsv(DEPOSIT_FILE, 'credit_card'), /checking\/savings download/);
   assert.throws(() => parseBankCsv(DEPOSIT_FILE, 'investment'), /doesn't fit/);
