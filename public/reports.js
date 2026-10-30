@@ -1,5 +1,5 @@
 // The Reports screen: a choice of report (Spending by category, Monthly
-// trend, Income vs. expenses) for a period chosen with the preset buttons or your own From/To
+// trend of income and spending, Income vs. expenses) for a period chosen with the preset buttons or your own From/To
 // dates.
 //
 // The server does the adding up (src/reports.js); this page draws the rows
@@ -160,22 +160,50 @@ function renderTrend(report) {
 
   const redraw = () => renderTrend(report);
   const columns = report.months.length + 3;
+  byId('trend-rows').replaceChildren(
+    ...trendSection(report.income, report.months, columns, redraw, {
+      title: 'Income',
+      totalLabel: 'Total income',
+      emptyText: 'No income in this period.',
+      uncategorized: 'in',
+    }),
+    ...trendSection(report.expenses, report.months, columns, redraw, {
+      title: 'Expenses',
+      totalLabel: 'Total spending',
+      emptyText: 'No spending in this period.',
+      uncategorized: 'out',
+    }),
+    // Net mixes every category, so (like the totals' average) it isn't one
+    // set of transactions to list: no drill-down.
+    trendRow('Net (income − spending)', report.net, report.months, 'total-row net-row')
+  );
+}
+
+// The rows for one section of the grid (Income or Expenses): a heading,
+// its groups (open one for its subs), its Uncategorized line and its total.
+// uncategorized ('in' or 'out') says which uncategorized money that line's
+// drill-down lists.
+function trendSection(section, months, columns, redraw, { title, totalLabel, emptyText, uncategorized }) {
+  const heading = document.createElement('tr');
+  heading.className = 'section-row';
+  const headingCell = cell(title);
+  headingCell.colSpan = columns;
+  heading.append(headingCell);
+
   const rows = [];
-  for (const group of report.groups) {
-    rows.push(trendRow(groupToggle(group, redraw), group, report.months, 'group-row', { categoryId: group.id }));
+  for (const group of section.groups) {
+    rows.push(trendRow(groupToggle(group, redraw), group, months, 'group-row', { categoryId: group.id }));
     if (openGroups.has(group.id)) {
       for (const sub of group.subs) {
-        rows.push(trendRow(subLabel(sub), sub, report.months, 'sub-row', { categoryId: sub.id }));
+        rows.push(trendRow(subLabel(sub), sub, months, 'sub-row', { categoryId: sub.id }));
       }
     }
   }
-  const { uncategorized } = report;
-  if (uncategorized.count > 0) {
-    rows.push(trendRow(uncategorizedLabel(uncategorized.count), uncategorized, report.months, 'group-row', { uncategorized: 'out' }));
+  if (section.uncategorized.count > 0) {
+    rows.push(trendRow(uncategorizedLabel(section.uncategorized.count), section.uncategorized, months, 'group-row', { uncategorized }));
   }
-  if (rows.length === 0) rows.push(messageRow('No spending in this period.', columns));
-  rows.push(trendRow('Total spending', report.total, report.months, 'total-row'));
-  byId('trend-rows').replaceChildren(...rows);
+  if (rows.length === 0) rows.push(messageRow(emptyText, columns));
+  return [heading, ...rows, trendRow(totalLabel, section.total, months, 'total-row')];
 }
 
 // One row of the grid: name, one amount per month, total and average.

@@ -236,6 +236,19 @@ body {
   padding-left: 28px;
 }
 
+/* The "Income" and "Expenses" headings, with a gap above to set the
+   sections apart. */
+.trend-table .section-row td {
+  font-weight: 600;
+  font-size: 15px;
+  padding-top: 18px;
+}
+
+/* Net sits under both sections, so it gets a heavier line above it. */
+.trend-table .net-row td {
+  border-top: 3px double var(--border);
+}
+
 /* --- Income vs. expenses chart (cashflow-chart.js) --- */
 
 .chart-legend {

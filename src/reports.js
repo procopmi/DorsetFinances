@@ -19,19 +19,31 @@ import { sumActuals, buildBudget } from './budget.js';
 // Only categories with money in the period are listed; a report is about
 // where money went, so empty categories would just be noise.
 export function spendingByCategory(categories, actualRows) {
-  const { signedByCategory, uncategorizedOut } = sumActuals(actualRows);
+  return byCategory(categories, actualRows, 'expense');
+}
+
+// The work behind spendingByCategory, for either kind of category, so the
+// trend report can add up income exactly the way it adds up spending.
+//   'expense': money out is negative in the register, so the sign is flipped
+//              to show spending as positive; uncategorized = money that went out.
+//   'income':  money in is already positive, so the sign is kept (a negative
+//              entry, like a clawback, lowers its category);
+//              uncategorized = money that came in.
+function byCategory(categories, actualRows, kind) {
+  const { signedByCategory, uncategorizedIn, uncategorizedOut } = sumActuals(actualRows);
+  const sign = kind === 'expense' ? -1 : 1;
+  const uncategorized = kind === 'expense' ? uncategorizedOut : uncategorizedIn;
 
   const groups = categories
-    .filter((c) => c.parent_id === null && c.kind === 'expense')
+    .filter((c) => c.parent_id === null && c.kind === kind)
     .map((group) => {
       const subs = categories
         .filter((c) => c.parent_id === group.id)
-        // Money out is negative in the register; flip it so spending is positive.
         .map((sub) => ({
           id: sub.id,
           name: sub.name,
           isHidden: Boolean(sub.is_hidden || group.is_hidden),
-          cents: -(signedByCategory.get(sub.id) ?? 0),
+          cents: sign * (signedByCategory.get(sub.id) ?? 0),
         }))
         .filter((sub) => sub.cents !== 0)
         .sort((a, b) => b.cents - a.cents);
@@ -40,10 +52,10 @@ export function spendingByCategory(categories, actualRows) {
     .filter((group) => group.subs.length > 0)
     .sort((a, b) => b.cents - a.cents);
 
-  const totalCents = groups.reduce((sum, g) => sum + g.cents, 0) + uncategorizedOut.cents;
+  const totalCents = groups.reduce((sum, g) => sum + g.cents, 0) + uncategorized.cents;
 
-  // Share of all spending, as a whole percent. This is for display only (the
-  // amounts themselves stay in exact cents), so ordinary division is fine.
+  // Share of the section's total, as a whole percent. This is for display only
+  // (the amounts themselves stay in exact cents), so ordinary division is fine.
   // Shares can add up to 99 or 101 because of rounding.
   const share = (cents) => (totalCents > 0 ? Math.round((cents * 100) / totalCents) : 0);
   for (const group of groups) {
@@ -53,37 +65,55 @@ export function spendingByCategory(categories, actualRows) {
 
   return {
     groups,
-    uncategorized: { ...uncategorizedOut, sharePercent: share(uncategorizedOut.cents) },
+    uncategorized: { ...uncategorized, sharePercent: share(uncategorized.cents) },
     totalCents,
   };
 }
 
-// Spending per month: categories down the side, months across, with a total
-// and a monthly average per row. Each month is worked out by
-// spendingByCategory above, so a month's column always equals that month's
-// Spending report.
+// Income and spending per month: categories down the side, months across,
+// with a total and a monthly average per row. Two sections, Income then
+// Expenses, and a Net row (income minus spending) under them. Each month of
+// a section is worked out by byCategory above, so a month's Expenses column
+// always equals that month's Spending report.
 // categories: db.listCategories(); monthlyRows: db.monthlyActualsBetween(from, to);
 // months: periods.monthsBetween(from, to).
 // Every line is { cells: [cents per month], totalCents, averageCents }. Returns {
 //   months,
+//   income:   section,
+//   expenses: section,
+//   net: line
+// }
+// where a section is {
 //   groups: [{ id, name, ...line, subs: [{ id, name, isHidden, ...line }] }],
 //   uncategorized: { ...line, count },
 //   total: line
 // }
+export function monthlyTrend(categories, monthlyRows, months) {
+  const income = trendSection(categories, monthlyRows, months, 'income');
+  const expenses = trendSection(categories, monthlyRows, months, 'expense');
+  return {
+    months,
+    income,
+    expenses,
+    net: line(income.total.cells.map((cents, i) => cents - expenses.total.cells[i])),
+  };
+}
+
+// One section of the trend (kind 'income' or 'expense').
 // Groups and subs are largest total first, and only those with money in
 // some month are listed.
-export function monthlyTrend(categories, monthlyRows, months) {
+function trendSection(categories, monthlyRows, months, kind) {
   const reports = months.map((month) =>
-    spendingByCategory(categories, monthlyRows.filter((row) => row.month === month))
+    byCategory(categories, monthlyRows.filter((row) => row.month === month), kind)
   );
-  // Per month, a look-up from group id (or sub id) to that month's spending.
+  // Per month, a look-up from group id (or sub id) to that month's amount.
   const groupCents = reports.map((report) => new Map(report.groups.map((g) => [g.id, g.cents])));
   const subCents = reports.map(
     (report) => new Map(report.groups.flatMap((g) => g.subs).map((s) => [s.id, s.cents]))
   );
 
   const groups = categories
-    .filter((c) => c.parent_id === null && c.kind === 'expense')
+    .filter((c) => c.parent_id === null && c.kind === kind)
     .map((group) => {
       const subs = categories
         .filter((c) => c.parent_id === group.id)
@@ -101,7 +131,6 @@ export function monthlyTrend(categories, monthlyRows, months) {
     .sort((a, b) => b.totalCents - a.totalCents);
 
   return {
-    months,
     groups,
     uncategorized: {
       ...line(reports.map((r) => r.uncategorized.cents)),

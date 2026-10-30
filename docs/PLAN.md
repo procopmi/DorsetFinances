@@ -264,6 +264,11 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
   - **(recap)** Partial months: a period that starts or ends mid-month (like Year to date) only counts the days inside it. A month cell's drill-down uses the same days.
   - **(recap)** Average = total ÷ the number of months shown, rounded to the cent. An empty or partial month pulls it down, and the screen says so. Averages aren't clickable.
   - **(recap)** Months with nothing are blank. Up to 36 months; a longer range is refused with a message.
+- **Monthly trend with income (18, 2026-10-30):**
+  - The grid now has an **Income** section (income groups, uncategorized money in, Total income) above the **Expenses** section (unchanged), and a **Net** row (income − spending) at the bottom.
+  - Income uses the same counting as spending, with the sign kept: a negative entry in an income category lowers it.
+  - A test checks that each month's Total income, Total spending and Net equal the Income vs. expenses report's.
+  - **(recap)** Net isn't clickable (it mixes every category).
 - **Income vs. expenses (15d):**
   - The third Reports view: per month, money in, money out and net (in minus out), with a Total row.
   - **Money in** is income categories plus uncategorized deposits. **Money out** is the spending from Spending by category.
@@ -322,7 +327,8 @@ Every table is `STRICT`, so SQLite itself refuses a decimal in a cents column or
 | 15d | Income vs. expenses (cash flow) | Done | `5157e89` |
 | 15e | Dashboard | Done | `8c15242` |
 | 16 | Register date filter (Year/Month or From/To, current year by default) and newest-first order | Done | `68b5eea` |
-| 17 | Fidelity CSV import (cash only; reinvestment rows skipped) | Done | (this commit) |
+| 17 | Fidelity CSV import (cash only; reinvestment rows skipped) | Done | `2f1edd4` |
+| 18 | Monthly trend: Income and Expenses sections, plus a Net row | Done | (this commit) |
 
 ### What's next
 All three phases in CLAUDE.md are built. Nothing is planned next. Ideas that came up along the way, for whenever real use calls for them:

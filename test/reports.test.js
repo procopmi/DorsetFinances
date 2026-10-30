@@ -184,7 +184,7 @@ test('each month gets its own column; a month with nothing shows 0', () => {
 
   const report = trend('2026-01-01', '2026-03-31');
   assert.deepEqual(report.months, ['2026-01', '2026-02', '2026-03']);
-  const food = report.groups[0];
+  const food = report.expenses.groups[0];
   assert.deepEqual(food.cells, [10000, 0, 15000]);
   assert.deepEqual(food.subs[0].cells, [10000, 0, 15000]);
   assert.equal(food.totalCents, 25000);
@@ -192,7 +192,7 @@ test('each month gets its own column; a month with nothing shows 0', () => {
 
 test('the average is the total over every month in the range, rounded to the cent', () => {
   add(card, '2026-01-10', -10000, groceries); // 100.00 over 3 months
-  const food = trend('2026-01-01', '2026-03-31').groups[0];
+  const food = trend('2026-01-01', '2026-03-31').expenses.groups[0];
   assert.equal(food.averageCents, 3333);
   assert.equal(food.totalCents, 10000); // the total stays exact
 });
@@ -201,8 +201,8 @@ test('rows are largest total first, and categories with no money are left out', 
   add(card, '2026-01-10', -1000, dining);
   add(checking, '2026-02-10', -50000, electric);
   const report = trend('2026-01-01', '2026-02-28');
-  assert.deepEqual(report.groups.map((g) => g.name), ['Utilities', 'Food']);
-  assert.deepEqual(report.groups[1].subs.map((s) => s.name), ['Dining Out']); // no Groceries
+  assert.deepEqual(report.expenses.groups.map((g) => g.name), ['Utilities', 'Food']);
+  assert.deepEqual(report.expenses.groups[1].subs.map((s) => s.name), ['Dining Out']); // no Groceries
 });
 
 test('each month column equals that month on its own, and the total equals the whole range', () => {
@@ -214,18 +214,53 @@ test('each month column equals that month on its own, and the total equals the w
   report.months.forEach((month, i) => {
     const [y, m] = month.split('-').map(Number);
     const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    assert.equal(report.total.cells[i], spending(`${month}-01`, `${month}-${last}`).totalCents, month);
+    assert.equal(report.expenses.total.cells[i], spending(`${month}-01`, `${month}-${last}`).totalCents, month);
   });
-  assert.equal(report.total.totalCents, spending('2026-02-01', '2026-04-30').totalCents);
-  assert.equal(report.uncategorized.totalCents, spending('2026-02-01', '2026-04-30').uncategorized.cents);
-  assert.equal(report.uncategorized.count, 2);
+  assert.equal(report.expenses.total.totalCents, spending('2026-02-01', '2026-04-30').totalCents);
+  assert.equal(report.expenses.uncategorized.totalCents, spending('2026-02-01', '2026-04-30').uncategorized.cents);
+  assert.equal(report.expenses.uncategorized.count, 2);
 });
 
 test('a range cut mid-month only counts the days inside it', () => {
   add(card, '2026-03-10', -100, groceries);
   add(card, '2026-03-20', -1000, groceries);
   const report = trend('2026-03-15', '2026-03-31');
-  assert.deepEqual(report.total.cells, [1000]);
+  assert.deepEqual(report.expenses.total.cells, [1000]);
+});
+
+test('income categories go in the Income section, shown positive, and expenses stay out of it', () => {
+  busyMonth();
+  const report = trend('2026-03-01', '2026-03-31');
+  assert.deepEqual(report.income.groups.map((g) => [g.name, g.cells]), [['Michael Income', [300000]]]);
+  assert.deepEqual(report.income.groups[0].subs.map((s) => [s.name, s.cells]), [['Pay', [300000]]]);
+  assert.ok(!report.expenses.groups.some((g) => g.name === 'Michael Income'));
+});
+
+test('uncategorized money in is Income, and money out is Expenses', () => {
+  busyMonth();
+  const report = trend('2026-03-01', '2026-03-31');
+  assert.deepEqual(report.income.uncategorized.cells, [4000]);
+  assert.equal(report.income.uncategorized.count, 1);
+  assert.deepEqual(report.expenses.uncategorized.cells, [2500]);
+  assert.equal(report.expenses.uncategorized.count, 1);
+});
+
+test('a negative income entry lowers its income category', () => {
+  add(checking, '2026-03-01', 300000, pay);
+  add(checking, '2026-03-20', -10000, pay); // e.g. a payroll correction
+  assert.deepEqual(trend('2026-03-01', '2026-03-31').income.total.cells, [290000]);
+});
+
+test('income, spending and net match Income vs. expenses month by month', () => {
+  busyMonth();
+  add(checking, '2026-04-01', 250000, pay);
+  add(card, '2026-04-15', -7000, groceries);
+
+  const report = trend('2026-02-01', '2026-04-30');
+  const flowMonths = cashFlow(db.listCategories(), db.monthlyActualsBetween('2026-02-01', '2026-04-30'), report.months).months;
+  assert.deepEqual(report.income.total.cells, flowMonths.map((m) => m.inCents));
+  assert.deepEqual(report.expenses.total.cells, flowMonths.map((m) => m.outCents));
+  assert.deepEqual(report.net.cells, flowMonths.map((m) => m.netCents));
 });
 
 // --- Income vs. expenses (cash flow) ---
